@@ -3,18 +3,12 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, Linking, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useApiClient } from "../../api/useApiClient";
-import {
-  getChannel,
-  getChannelVideos,
-  subscribeToChannel,
-  unsubscribeFromChannel,
-  type Channel,
-} from "../../api/channels";
+import { getChannel, getChannelVideos, type Channel } from "../../api/channels";
 import { useCursorPage, type Page } from "../../api/pagination";
 import { getVideo, type Video } from "../../api/videos";
+import { SubscribeControl } from "../../engagement/SubscribeControl";
 import { useAuth } from "../../store/AuthContext";
 import { Avatar } from "../../ui/Avatar";
-import { Button } from "../../ui/Button";
 import { Chip } from "../../ui/Chip";
 import { LoadingState } from "../../ui/LoadingState";
 import { Screen } from "../../ui/Screen";
@@ -74,10 +68,10 @@ export default function ChannelScreen() {
   const [channel, setChannel] = useState<Channel | null>(null);
   const [loadingChannel, setLoadingChannel] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const [subscribePending, setSubscribePending] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [featuredVideo, setFeaturedVideo] = useState<Video | null>(null);
+  /** +1/-1/0 vs. the subscriber count last fetched — kept by `SubscribeControl`'s `onSubscribedChange` so the header count tracks an optimistic toggle without a second `getChannel` round trip. */
+  const [subscriberDelta, setSubscriberDelta] = useState(0);
 
   const loadChannel = useCallback(async () => {
     if (!handle) return;
@@ -86,7 +80,7 @@ export default function ChannelScreen() {
     try {
       const result = await getChannel(client, handle);
       setChannel(result);
-      setIsSubscribed(result.is_subscribed ?? false);
+      setSubscriberDelta(0);
     } catch {
       setChannel(null);
       setNotFound(true);
@@ -152,28 +146,6 @@ export default function ChannelScreen() {
 
   const isOwnChannel = !!channel?.id && !!user?.channel_id && user.channel_id === channel.id;
 
-  const toggleSubscribe = async () => {
-    if (!channel?.id || subscribePending) return;
-    if (!isAuthenticated) {
-      router.push("/setup/login");
-      return;
-    }
-    const next = !isSubscribed;
-    setIsSubscribed(next);
-    setSubscribePending(true);
-    try {
-      if (next) {
-        await subscribeToChannel(client, channel.id);
-      } else {
-        await unsubscribeFromChannel(client, channel.id);
-      }
-    } catch {
-      setIsSubscribed(!next);
-    } finally {
-      setSubscribePending(false);
-    }
-  };
-
   const onPressVideo = (video: Video) => {
     if (video.id) router.push(`/watch/${video.id}`);
   };
@@ -221,19 +193,23 @@ export default function ChannelScreen() {
             style={{ color: theme.colors.textSecondary, fontSize: theme.fontSize.sm, marginTop: theme.spacing[1] }}
             numberOfLines={1}
           >
-            @{channel.handle} · {formatCompactNumber(channel.subscriber_count ?? 0)} subscribers
+            @{channel.handle} · {formatCompactNumber((channel.subscriber_count ?? 0) + subscriberDelta)} subscribers
           </Text>
         </View>
       </View>
 
-      {!isOwnChannel ? (
+      {!isOwnChannel && channel.id ? (
         <View style={{ marginTop: theme.spacing[3] }}>
-          <Button
-            label={isSubscribed ? "Subscribed" : "Subscribe"}
-            variant={isSubscribed ? "secondary" : "primary"}
-            disabled={subscribePending}
-            onPress={toggleSubscribe}
-            testID="subscribe-button"
+          <SubscribeControl
+            channelId={channel.id}
+            initialIsSubscribed={channel.is_subscribed ?? false}
+            isAuthenticated={isAuthenticated}
+            onRequireAuth={() => router.push("/setup/login")}
+            onSubscribedChange={(next) => {
+              const original = channel.is_subscribed ?? false;
+              setSubscriberDelta(next === original ? 0 : next ? 1 : -1);
+            }}
+            testIDPrefix="subscribe"
           />
         </View>
       ) : null}

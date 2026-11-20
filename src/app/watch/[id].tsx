@@ -5,8 +5,12 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { ApiError } from "../../api/http";
 import { useApiClient } from "../../api/useApiClient";
 import { getRelatedVideos, getVideo, recordView, updateProgress, type Video } from "../../api/videos";
+import { ActionPills } from "../../engagement/ActionPills";
+import { CommentsSheet } from "../../engagement/CommentsSheet";
+import { SubscribeControl } from "../../engagement/SubscribeControl";
 import { useMiniPlayer } from "../../player/miniPlayerStore";
 import { VideoPlayer } from "../../player/VideoPlayer";
+import { useAuth } from "../../store/AuthContext";
 import { useTheme } from "../../theme/ThemeProvider";
 import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
@@ -45,9 +49,13 @@ function makeSessionId(): string {
  *    M2, per PLAN.md §17.1's "Settings" row) to store the toggle in, so
  *    autoplay-next always runs here. A later chunk wiring Settings should
  *    gate this the same way the web does.
- *  - **Engagement is a stub.** Like/dislike/subscribe/comments are M1
- *    chunk 6's job — the channel row below renders a disabled-looking
- *    Subscribe button as an obvious slot rather than wiring a real toggle.
+ *  - **Engagement (M1 chunk 6)** — like/dislike, subscribe + bell levels,
+ *    comments, share, save — is wired via `ActionPills`/`SubscribeControl`/
+ *    `CommentsSheet` in `src/engagement/`, not inline here. `SubscribeControl`
+ *    starts every Watch-page view at `isSubscribed: false` and tracks it
+ *    purely optimistically — `Video` carries no `is_subscribed` for the
+ *    caller (only `Channel` does), same documented gap as the web's
+ *    `channel-row.ts`.
  *  - **Background audio / PiP (M1 chunk 5)** are wired in `VideoPlayer`
  *    itself (`staysActiveInBackground`/`showNowPlayingNotification`/PiP
  *    props/manual button) rather than here — this screen just passes
@@ -58,6 +66,7 @@ export default function WatchScreen() {
   const router = useRouter();
   const client = useApiClient();
   const miniPlayer = useMiniPlayer();
+  const { isAuthenticated } = useAuth();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [state, setState] = useState<PageState>({ kind: "loading" });
@@ -65,6 +74,9 @@ export default function WatchScreen() {
   const [relatedLoading, setRelatedLoading] = useState(false);
   /** Set once, right after reclaiming inline playback from the mini player — see `expandFromMiniPlayer`. */
   const [resumeOverrideS, setResumeOverrideS] = useState<number | null>(null);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  /** Seeded from `video.comment_count` once ready, then adjusted locally as the comments sheet posts/deletes — see the reset in the id-keyed effect below. */
+  const [commentCountOverride, setCommentCountOverride] = useState<number | null>(null);
 
   const playerStateRef = useRef<{ currentTimeS: number; isPlaying: boolean }>({ currentTimeS: 0, isPlaying: false });
   const readyVideoRef = useRef<Video | null>(null);
@@ -112,6 +124,8 @@ export default function WatchScreen() {
     setResumeOverrideS(null);
     setState({ kind: "loading" });
     setRelatedVideos([]);
+    setCommentsOpen(false);
+    setCommentCountOverride(null);
 
     async function poll(): Promise<void> {
       try {
@@ -323,15 +337,25 @@ export default function WatchScreen() {
                 {video.channel_name}
               </Text>
             </View>
-            {/*
-             * Subscribe slot for M1 chunk 6 (engagement/comments): disabled
-             * on purpose — real subscribe/bell-level wiring, plus
-             * like/dislike and the comments bottom sheet, land there. Kept
-             * visually present (not omitted) so the layout doesn't shift
-             * once chunk 6 wires it up.
-             */}
-            <Button label="Subscribe" onPress={() => {}} disabled testID="subscribe-button-stub" />
+            {video.channel_id ? (
+              <SubscribeControl
+                channelId={video.channel_id}
+                initialIsSubscribed={false}
+                isAuthenticated={isAuthenticated}
+                onRequireAuth={() => router.push("/setup/login")}
+                testIDPrefix="watch-subscribe"
+              />
+            ) : null}
           </View>
+
+          <ActionPills
+            key={video.id}
+            video={video}
+            commentCount={commentCountOverride ?? video.comment_count ?? 0}
+            isAuthenticated={isAuthenticated}
+            onRequireAuth={() => router.push("/setup/login")}
+            onOpenComments={() => setCommentsOpen(true)}
+          />
 
           {video.description ? (
             <Text
@@ -362,6 +386,15 @@ export default function WatchScreen() {
           />
         </View>
       </ScrollView>
+
+      <CommentsSheet
+        visible={commentsOpen}
+        onClose={() => setCommentsOpen(false)}
+        videoId={video.id ?? ""}
+        videoChannelId={video.channel_id ?? null}
+        commentCount={commentCountOverride ?? video.comment_count ?? 0}
+        onCommentCountChange={setCommentCountOverride}
+      />
     </Screen>
   );
 }

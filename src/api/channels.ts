@@ -36,3 +36,31 @@ export async function subscribeToChannel(client: ApiClient, channelId: string): 
 export async function unsubscribeFromChannel(client: ApiClient, channelId: string): Promise<void> {
   await client.request<void>(`/channels/${channelId}/subscribe`, { method: "DELETE" });
 }
+
+export type NotificationLevel = "all" | "personalized" | "none";
+
+export interface UpdateSubscriptionLevelResult {
+  notification_level?: NotificationLevel;
+}
+
+/**
+ * `PATCH /channels/{id}/subscription` (added R3-P4) — additive to the
+ * boolean subscribe/unsubscribe above: only changes how notified an
+ * already-subscribed caller is. Requires auth.
+ *
+ * Same contract gap the web client already documents
+ * (`subscription-level-menu.ts`): there is no `GET` for the caller's
+ * *current* level, so a screen has no way to know it on load and defaults
+ * to `personalized` (the DB default) until the caller explicitly changes
+ * it this session.
+ */
+export async function updateSubscriptionLevel(
+  client: ApiClient,
+  channelId: string,
+  level: NotificationLevel
+): Promise<UpdateSubscriptionLevelResult> {
+  return client.request<UpdateSubscriptionLevelResult>(`/channels/${channelId}/subscription`, {
+    method: "PATCH",
+    body: { notification_level: level },
+  });
+}
