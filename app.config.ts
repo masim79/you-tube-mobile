@@ -58,7 +58,32 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         recordAudioAndroid: false,
       },
     ],
-    "expo-video",
+    [
+      "expo-video",
+      {
+        // PLAN.md §17.1 "Background & PiP" / §17.7: audio must keep playing
+        // with the app backgrounded or the screen locked, with lock-screen
+        // controls, plus Picture-in-Picture on both platforms. Both flags
+        // are read by `expo-video`'s own config plugin
+        // (`node_modules/expo-video/plugin/build/withExpoVideo.js`), which
+        // derives everything platform-specific from them rather than this
+        // file hand-rolling it:
+        //  - iOS: adds `UIBackgroundModes: ["audio"]` to Info.plist when
+        //    either flag is true (no manual `infoPlist` entry needed here).
+        //  - Android: sets the main activity's
+        //    `android:supportsPictureInPicture` from
+        //    `supportsPictureInPicture`, and — only when
+        //    `supportsBackgroundPlayback` is true — adds the
+        //    `FOREGROUND_SERVICE`/`FOREGROUND_SERVICE_MEDIA_PLAYBACK`
+        //    permissions plus the `ExpoVideoPlaybackService` foreground
+        //    service + media3 `MediaSessionService` intent filter that
+        //    backs both continued background playback and the lock-screen/
+        //    notification transport controls (`VideoPlayer.
+        //    showNowPlayingNotification`, set in `src/player/VideoPlayer.tsx`).
+        supportsBackgroundPlayback: true,
+        supportsPictureInPicture: true,
+      },
+    ],
     [
       "expo-build-properties",
       {

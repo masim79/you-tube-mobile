@@ -1,6 +1,6 @@
 import { useEvent, useEventListener } from "expo";
 import * as ScreenOrientation from "expo-screen-orientation";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { isPictureInPictureSupported, useVideoPlayer, VideoView, type VideoSource } from "expo-video";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Image,
@@ -31,6 +31,8 @@ export interface VideoPlayerProps {
   /** Absolute, already-resolved poster/thumbnail URL. */
   poster?: string | null;
   title?: string;
+  /** Shown as the lock-screen/notification "now playing" subtitle (`VideoMetadata.artist`) — absent/no-op in compact mode, same as `title`. */
+  channelName?: string | null;
   /** `Video.qualities` — rendition heights, e.g. `[360, 720]`; the picker's fallback until real tracks load. */
   qualities?: readonly number[];
   /** Resume position (`Video.resume_position_s`) — seeked to once, on the first `sourceLoad`. */
@@ -62,11 +64,32 @@ const MAX_RATE = PLAYBACK_RATE_STEPS[PLAYBACK_RATE_STEPS.length - 1] ?? 2;
  * a plain full-bleed `Modal` rendering this exact same surface, with
  * `expo-screen-orientation` locking to landscape while it's open — the
  * gesture layer and custom controls keep working identically in both modes.
+ *
+ * Background audio / lock-screen controls / Picture-in-Picture (PLAN.md
+ * §17.1 "Background & PiP", M1 chunk 5): `staysActiveInBackground` and
+ * `showNowPlayingNotification` are set unconditionally on every player
+ * instance below — both are no-ops unless `app.config.ts`'s `expo-video`
+ * plugin options (`supportsBackgroundPlayback`/`supportsPictureInPicture`)
+ * are on, which they are. PiP itself (`allowsPictureInPicture` +
+ * `startsPictureInPictureAutomatically` on `VideoView`, plus the manual
+ * button below) is scoped to `!compact` — the mini-player widget is already
+ * an in-app floating surface, so a second, OS-level floating window over it
+ * would be redundant rather than useful.
+ *
+ * Known gap, not fixed here: the mini-player and the inline/fullscreen
+ * player are *separate* `VideoPlayer` instances (each owns its own
+ * `useVideoPlayer`), so if a mini-player for video A is floating while the
+ * viewer opens the watch screen for a *different* video B, both instances
+ * have `showNowPlayingNotification`/background playback active
+ * simultaneously. `expo-video`'s docs note only one player can hold PiP at
+ * a time, but say nothing about two concurrent now-playing sessions —
+ * unverified without a device; flagged for a later chunk if it misbehaves.
  */
 export function VideoPlayer({
   src,
   poster = null,
   title,
+  channelName = null,
   qualities = [],
   startAtS = null,
   compact = false,
@@ -82,11 +105,30 @@ export function VideoPlayer({
   const player = useVideoPlayer(null, (p) => {
     p.loop = loop;
     p.timeUpdateEventInterval = 0.5;
+    // §17.1 "Background & PiP": keep playing audio with the app
+    // backgrounded/screen locked, and surface lock-screen/notification
+    // transport controls. Both are no-ops unless `app.config.ts`'s
+    // `expo-video` plugin has `supportsBackgroundPlayback: true` (see that
+    // file's comment) — true on every platform this targets, so these are
+    // set unconditionally rather than gated on `compact`.
+    p.staysActiveInBackground = true;
+    p.showNowPlayingNotification = true;
   });
 
   const lastAttachedSrcRef = useRef<string | null>(null);
   const resumedRef = useRef(false);
   const autoplayTriggeredRef = useRef(false);
+  const videoViewRef = useRef<VideoView>(null);
+  const [isInPictureInPicture, setIsInPictureInPicture] = useState(false);
+  const [pipSupported, setPipSupported] = useState(false);
+
+  useEffect(() => {
+    try {
+      setPipSupported(isPictureInPictureSupported());
+    } catch {
+      setPipSupported(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!src || src === lastAttachedSrcRef.current) {
@@ -96,8 +138,27 @@ export function VideoPlayer({
     lastAttachedSrcRef.current = src;
     resumedRef.current = false;
     autoplayTriggeredRef.current = false;
-    player.replaceAsync(src).catch(() => onPlaybackError?.("Could not load this video."));
-  }, [src, player, onPlaybackError]);
+    // An object source (rather than a bare string) carries the
+    // lock-screen/notification "now playing" metadata — `title`/`artist`/
+    // `artwork` feed `VideoMetadata`, which `showNowPlayingNotification`
+    // above displays. Falls back to the bare string when there's no title
+    // to show (e.g. a caller that never passes one), since `metadata` with
+    // every field `undefined` is equivalent but noisier to read.
+    const source: VideoSource = title
+      ? { uri: src, metadata: { title, artist: channelName ?? undefined, artwork: poster ?? undefined } }
+      : src;
+    player.replaceAsync(source).catch(() => onPlaybackError?.("Could not load this video."));
+  }, [src, title, channelName, poster, player, onPlaybackError]);
+
+  async function enterPictureInPicture(): Promise<void> {
+    try {
+      await videoViewRef.current?.startPictureInPicture();
+    } catch {
+      // Device/OS declines (unsupported, another player already holds PiP,
+      // or the app isn't in a PiP-eligible state) — no UI for this beyond
+      // the button simply not having visibly done anything.
+    }
+  }
 
   const { isPlaying } = useEvent(player, "playingChange", { isPlaying: player.playing });
   const { playbackRate } = useEvent(player, "playbackRateChange", { playbackRate: player.playbackRate });
@@ -250,14 +311,26 @@ export function VideoPlayer({
       ) : null}
 
       <VideoView
+        ref={videoViewRef}
         style={StyleSheet.absoluteFill}
         player={player}
         nativeControls={false}
         contentFit={isZoomed ? "cover" : "contain"}
         fullscreenOptions={{ enable: false }}
+        // PiP is only offered from the full/inline surface, never the
+        // in-app mini-player widget (see the component's doc comment) —
+        // `startsPictureInPictureAutomatically` auto-enters it when the app
+        // backgrounds while this surface is the one mounted, matching the
+        // YouTube app's own behavior; the manual button below covers
+        // devices/OS versions where the automatic path isn't available
+        // (its own doc says Android 12+).
+        allowsPictureInPicture={!compact}
+        startsPictureInPictureAutomatically={!compact}
+        onPictureInPictureStart={() => setIsInPictureInPicture(true)}
+        onPictureInPictureStop={() => setIsInPictureInPicture(false)}
       />
 
-      {!compact ? (
+      {!compact && !isInPictureInPicture ? (
         <GestureDetector gesture={gesture}>
           <View style={StyleSheet.absoluteFill} />
         </GestureDetector>
@@ -300,7 +373,11 @@ export function VideoPlayer({
         >
           <Text style={{ color: theme.colors.text, fontSize: theme.fontSize.lg }}>{isPlaying ? "❙❙" : "▶"}</Text>
         </Pressable>
-      ) : controlsVisible ? (
+      ) : controlsVisible && !isInPictureInPicture ? (
+        // Hidden while this view's own PiP window is active (`§17.1`
+        // "Background & PiP") — there's no room for this chrome in the
+        // shrunk floating window, and the OS supplies its own transport
+        // controls there independent of `nativeControls={false}` above.
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           <View style={[styles.topBar, { paddingHorizontal: theme.spacing[3] }]} pointerEvents="box-none">
             {title ? (
@@ -375,6 +452,17 @@ export function VideoPlayer({
                 >
                   <Text style={{ color: PLAYER_CHROME.text, fontSize: theme.fontSize.sm }}>{isFullscreen ? "⤡" : "⤢"}</Text>
                 </Pressable>
+                {pipSupported ? (
+                  <Pressable
+                    onPress={enterPictureInPicture}
+                    accessibilityRole="button"
+                    accessibilityLabel="Picture in picture"
+                    hitSlop={8}
+                    style={{ marginLeft: theme.spacing[3] }}
+                  >
+                    <Text style={{ color: PLAYER_CHROME.text, fontSize: theme.fontSize.sm }}>⧉</Text>
+                  </Pressable>
+                ) : null}
               </View>
             </View>
           </View>

@@ -48,9 +48,10 @@ function makeSessionId(): string {
  *  - **Engagement is a stub.** Like/dislike/subscribe/comments are M1
  *    chunk 6's job — the channel row below renders a disabled-looking
  *    Subscribe button as an obvious slot rather than wiring a real toggle.
- *  - **Background audio / PiP are chunk 5.** This screen's player keeps
- *    playing while the app is foregrounded only; nothing here reaches for
- *    `expo-video`'s PiP APIs or changes `app.config.ts`'s background modes.
+ *  - **Background audio / PiP (M1 chunk 5)** are wired in `VideoPlayer`
+ *    itself (`staysActiveInBackground`/`showNowPlayingNotification`/PiP
+ *    props/manual button) rather than here — this screen just passes
+ *    `title`/`channelName` through for the lock-screen "now playing" text.
  */
 export default function WatchScreen() {
   const theme = useTheme();
@@ -294,6 +295,7 @@ export default function WatchScreen() {
             src={resolveMediaUrl(client.baseUrl, video.playback_url)}
             poster={resolveMediaUrl(client.baseUrl, video.thumbnail_path)}
             title={video.title ?? undefined}
+            channelName={video.channel_name ?? null}
             qualities={video.qualities ?? []}
             startAtS={resumeOverrideS ?? video.resume_position_s ?? null}
             autoplayOnAttach

@@ -86,6 +86,8 @@ export function MiniPlayer() {
             key={state.videoId}
             src={state.src}
             poster={state.poster}
+            title={state.title}
+            channelName={state.channelName}
             qualities={state.qualities}
             startAtS={state.startAtS}
             compact
