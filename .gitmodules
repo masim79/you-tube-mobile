@@ -1,0 +1,3 @@
+[submodule "vendor/you-tube"]
+	path = vendor/you-tube
+	url = ../you-tube
