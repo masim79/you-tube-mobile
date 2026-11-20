@@ -1,0 +1,58 @@
+# Maestro flow stub for the M0 happy path: first-run server setup (manual
+# URL entry, not the QR path — Maestro has no camera-input story for that)
+# through to a logged-in tab shell, and back out via logout.
+#
+# PLAN.md §17.2's Gate M-A ("finds the server by QR scan, logs in, and
+# survives an app restart still logged in") is a *physical-device* gate —
+# this flow is the manual-entry subset of it that a CI runner or local
+# `maestro test` run can actually exercise, not a substitute for the real
+# gate. Nice-to-have per the M0 task packet, not a blocker.
+#
+# Requires: a dev client build installed on the target device/emulator,
+# and ${SERVER_URL} pointing at a reachable HomeTube server (e.g.
+# http://10.0.2.2:8000 from the Android emulator alias for the host
+# machine, per the M0 task packet's environment notes).
+appId: com.hometube.mobile
+---
+- launchApp:
+    clearState: true
+
+- assertVisible:
+    id: "setup-server-url-input"
+
+- tapOn:
+    id: "setup-server-url-input"
+- inputText: "${SERVER_URL}"
+
+- tapOn:
+    id: "setup-continue-button"
+
+# Lands on the login screen once the server responds and the version
+# check passes.
+- assertVisible:
+    id: "login-email-input"
+
+- tapOn:
+    id: "login-email-input"
+- inputText: "${TEST_EMAIL}"
+
+- tapOn:
+    id: "login-password-input"
+- inputText: "${TEST_PASSWORD}"
+
+- tapOn:
+    id: "login-submit-button"
+
+# Tab shell — "You" tab has the logout button this flow also exercises.
+- assertVisible:
+    text: "You"
+- tapOn:
+    text: "You"
+- assertVisible:
+    id: "logout-button"
+- tapOn:
+    id: "logout-button"
+
+# Back to login — proves the local session was actually cleared.
+- assertVisible:
+    id: "login-email-input"
