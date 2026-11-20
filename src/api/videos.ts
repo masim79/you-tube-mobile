@@ -45,6 +45,34 @@ export async function postReaction(
   });
 }
 
+/** `PUT /videos/{id}/progress` — idempotent resume-position save. Requires auth. */
+export async function updateProgress(client: ApiClient, id: string, positionS: number): Promise<void> {
+  await client.request<void>(`/videos/${id}/progress`, {
+    method: "PUT",
+    body: { position_s: Math.max(0, Math.floor(positionS)) },
+  });
+}
+
+export interface RecordViewParams {
+  watchedS: number;
+  sessionId: string;
+  source?: "home" | "search" | "channel" | "related" | "external";
+  maxPositionPct?: number | null;
+}
+
+/** `POST /videos/{id}/view` — heartbeat; anonymous-allowed, counted once per session server-side. */
+export async function recordView(client: ApiClient, id: string, params: RecordViewParams): Promise<void> {
+  await client.request<void>(`/videos/${id}/view`, {
+    method: "POST",
+    body: {
+      watched_s: Math.max(0, Math.floor(params.watchedS)),
+      session_id: params.sessionId,
+      ...(params.source ? { source: params.source } : {}),
+      ...(params.maxPositionPct != null ? { max_position_pct: params.maxPositionPct } : {}),
+    },
+  });
+}
+
 /** `POST /videos/{id}/watch-later` — adds to the caller's system `watch_later` playlist. Requires auth. */
 export async function addToWatchLater(client: ApiClient, id: string): Promise<void> {
   await client.request<void>(`/videos/${id}/watch-later`, { method: "POST" });

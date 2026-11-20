@@ -1,6 +1,9 @@
 import React from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { Bootstrap } from "../navigation/Bootstrap";
+import { MiniPlayer } from "../player/MiniPlayer";
+import { MiniPlayerProvider } from "../player/miniPlayerStore";
 import { AuthProvider } from "../store/AuthContext";
 import { ServerProvider } from "../store/ServerContext";
 import { ThemeProvider } from "../theme/ThemeProvider";
@@ -9,15 +12,31 @@ import { ThemeProvider } from "../theme/ThemeProvider";
  * Provider order matters: `AuthProvider` reads `useServer()`, so
  * `ServerProvider` must be the outer one. `Bootstrap` (inside both)
  * decides the first route on every launch (PLAN.md §17.6, Gate M-A).
+ *
+ * `GestureHandlerRootView` is required once, at the true root, for
+ * `react-native-gesture-handler`'s gestures to work anywhere in the tree —
+ * added in M1 chunk 4 for the watch screen's double-tap/pan/pinch gestures
+ * and the mini-player's swipe-to-dismiss.
+ *
+ * `MiniPlayerProvider`/`<MiniPlayer/>` sit beside `Bootstrap`, not inside
+ * its `<Stack/>`, so the floating player survives every route change
+ * (PLAN.md §17.1 "Mini-player") including the auth redirect in
+ * `(tabs)/_layout.tsx` — `MiniPlayer` renders nothing when no video is
+ * floating, so this is a no-op until `WatchScreen` opens one.
  */
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <ServerProvider>
-        <AuthProvider>
-          <Bootstrap />
-        </AuthProvider>
-      </ServerProvider>
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <ServerProvider>
+          <AuthProvider>
+            <MiniPlayerProvider>
+              <Bootstrap />
+              <MiniPlayer />
+            </MiniPlayerProvider>
+          </AuthProvider>
+        </ServerProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

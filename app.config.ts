@@ -58,6 +58,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         recordAudioAndroid: false,
       },
     ],
+    "expo-video",
     [
       "expo-build-properties",
       {
