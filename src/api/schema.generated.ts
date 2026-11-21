@@ -976,6 +976,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Added M3 (§17.6, §24 2026-11-21). Registers (or re-registers) an Expo push token for push delivery via the `notify_subscribers` fan-out job. Upsert keyed on `expo_push_token` — a reinstall or re-login on the same device re-registers the same token rather than creating a duplicate row, and re-assigns it to whichever user is currently calling (a device can only ever notify its current owner, not every past one). */
+        post: operations["registerDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/devices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Added M3. Caller must own the device row (another user's device id 404s, not 403 — same "don't confirm existence" shape as other owner-scoped lookups, §20.1). Idempotent: deleting an already-deleted or unknown-to-this-caller id still answers 404, never a 204-for-anything error-masking shortcut. */
+        delete: operations["unregisterDevice"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notifications/stream": {
         parameters: {
             query?: never;
@@ -1983,6 +2017,18 @@ export interface components {
         NotificationPage: {
             items?: components["schemas"]["Notification"][];
             next_cursor?: string | null;
+        };
+        /** @description Added M3 (§17.6, §24 2026-11-21). A registered Expo push token. */
+        Device: {
+            /** Format: uuid */
+            id?: string;
+            /** @enum {string} */
+            platform?: "ios" | "android";
+            app_version?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            last_seen_at?: string;
         };
         /** @description Added R3-P4. */
         PollOption: {
@@ -4302,6 +4348,59 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    registerDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expo_push_token: string;
+                    /** @enum {string} */
+                    platform: "ios" | "android";
+                    app_version: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Registered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Device"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    unregisterDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unregistered */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     streamNotifications: {
