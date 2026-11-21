@@ -65,6 +65,21 @@ export function formatDuration(totalSeconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/** "812 MB", "1.3 GB" — binary-ish human file sizes, matching the web's
+ * `pages/upload/upload-constants.ts` `formatFileSize` (upload progress UI, M1 chunk 7). */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const rounded = value >= 100 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${rounded} ${units[unitIndex]}`;
+}
+
 /**
  * Resolves a server-relative media path (`thumbnail_path`,
  * `channel_avatar_path` — never under `/api`, served straight from disk

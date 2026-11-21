@@ -9,6 +9,22 @@ export async function getVideo(client: ApiClient, id: string): Promise<Video> {
   return client.request<Video>(`/videos/${id}`);
 }
 
+/**
+ * `GET /uploads/{tus_upload_id}/video` (PLAN.md §20.5, contract added during
+ * R1-P6/P8/P9 integration — mirrors the web's `tryResolveVideoId` in
+ * `vendor/you-tube/frontend/src/app/pages/upload/upload-page.ts`). The
+ * `post-finish` tusd hook creates the `videos` row server-to-server and
+ * never tells the uploading client its id directly, so this is how the
+ * Create screen (M1 chunk 7) learns `video_id` once the upload finishes.
+ * 404s both for a non-owner and while the hook hasn't landed yet — callers
+ * are expected to retry/poll a few times before giving up, same as the web.
+ * Not re-exported as a named `Video`-shaped response since the contract
+ * only promises `{video_id}`.
+ */
+export async function getVideoForUpload(client: ApiClient, tusUploadId: string): Promise<{ video_id: string }> {
+  return client.request<{ video_id: string }>(`/uploads/${tusUploadId}/video`);
+}
+
 export interface RelatedVideosParams {
   cursor?: string | null;
   limit?: number;

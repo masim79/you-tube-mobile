@@ -52,12 +52,29 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-camera",
       {
+        // M1 chunk 7 (Create/Upload): the camera is now also used to record
+        // a video in-app (`CameraView.recordAsync`, `src/app/(tabs)/create.tsx`),
+        // not just to scan the setup QR code, so microphone access is
+        // needed too — `recordAudioAndroid` flipped from its M0-era `false`.
         cameraPermission:
-          "HomeTube uses the camera to scan your server's setup QR code.",
-        // QR scanning only — no microphone/audio-recording permission needed.
-        recordAudioAndroid: false,
+          "HomeTube uses the camera to scan your server's setup QR code and to record videos.",
+        microphonePermission:
+          "HomeTube uses the microphone to record audio for videos you record in-app.",
+        recordAudioAndroid: true,
       },
     ],
+    [
+      "expo-image-picker",
+      {
+        // M1 chunk 7: picking an existing video from the camera roll to upload.
+        photosPermission:
+          "HomeTube uses your photo library to pick a video to upload.",
+      },
+    ],
+    // M1 chunk 7: the upload progress notification (`src/upload/uploadNotifications.ts`).
+    // No custom icon/color/sound configured — the platform default is fine for a
+    // transient progress notification.
+    "expo-notifications",
     [
       "expo-video",
       {
