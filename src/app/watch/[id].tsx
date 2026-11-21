@@ -1,9 +1,11 @@
 import { File } from "expo-file-system";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { NetworkStateType, useNetworkState } from "expo-network";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { getCaptions, type Caption } from "../../api/captions";
+import { getChapters, type Chapter } from "../../api/chapters";
 import { ApiError } from "../../api/http";
 import { useApiClient } from "../../api/useApiClient";
 import { getRelatedVideos, getVideo, recordView, updateProgress, type Video } from "../../api/videos";
@@ -12,13 +14,13 @@ import { ActionPills } from "../../engagement/ActionPills";
 import { CommentsSheet } from "../../engagement/CommentsSheet";
 import { SubscribeControl } from "../../engagement/SubscribeControl";
 import { useMiniPlayer } from "../../player/miniPlayerStore";
-import { VideoPlayer } from "../../player/VideoPlayer";
+import { VideoPlayer, type CaptionTrackOption, type VideoPlayerHandle } from "../../player/VideoPlayer";
 import { useAuth } from "../../store/AuthContext";
 import { useSettings } from "../../store/SettingsContext";
 import { useTheme } from "../../theme/ThemeProvider";
 import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
-import { formatCompactNumber, formatRelativeTime, resolveMediaUrl } from "../../ui/format";
+import { formatCompactNumber, formatDuration, formatRelativeTime, resolveMediaUrl } from "../../ui/format";
 import { LoadingState } from "../../ui/LoadingState";
 import { Screen } from "../../ui/Screen";
 import { VideoList } from "../../ui/VideoList";
@@ -123,7 +125,11 @@ export default function WatchScreen() {
   const [commentsOpen, setCommentsOpen] = useState(false);
   /** Seeded from `video.comment_count` once ready, then adjusted locally as the comments sheet posts/deletes — see the reset in the id-keyed effect below. */
   const [commentCountOverride, setCommentCountOverride] = useState<number | null>(null);
+  /** `GET /videos/{id}/captions`/`GET /videos/{id}/chapters` (M3 chunk 2, PLAN.md §17.1) — fetched once per `id`, independent of the ready/processing poll above since both are public, viewer-side-only resources. */
+  const [captions, setCaptions] = useState<Caption[]>([]);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
 
+  const playerRef = useRef<VideoPlayerHandle>(null);
   const playerStateRef = useRef<{ currentTimeS: number; isPlaying: boolean }>({ currentTimeS: 0, isPlaying: false });
   const readyVideoRef = useRef<Video | null>(null);
   const watchedSecondsRef = useRef(0);
@@ -173,6 +179,8 @@ export default function WatchScreen() {
     setCommentsOpen(false);
     setCommentCountOverride(null);
     setLocalPlaybackUri(null);
+    setCaptions([]);
+    setChapters([]);
 
     async function poll(): Promise<void> {
       try {
@@ -229,6 +237,35 @@ export default function WatchScreen() {
     };
   }, [id]);
 
+  // M3 chunk 2: captions + chapters, fetched once per `id` — both public,
+  // viewer-side-only resources (listCaptions/getChapters), independent of
+  // the ready/processing poll above. A 404 (deleted video, bad id) just
+  // leaves both empty; the poll effect above is what reports "not found".
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void getCaptions(client, id).then(
+      (list) => {
+        if (!cancelled) setCaptions(list);
+      },
+      () => {
+        if (!cancelled) setCaptions([]);
+      }
+    );
+    void getChapters(client, id).then(
+      (list) => {
+        if (!cancelled) setChapters(list);
+      },
+      () => {
+        if (!cancelled) setChapters([]);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, client.request]);
+
   // Progress-save (8s) + view-heartbeat (10s) timers, set up once per mount
   // (not per `id` — `readyVideoRef` always has the current video) with a
   // best-effort final save on unmount, mirroring the web page's
@@ -271,6 +308,29 @@ export default function WatchScreen() {
 
   function goToNextVideo(): void {
     if (nextVideoId) router.replace(`/watch/${nextVideoId}`);
+  }
+
+  // M3 chunk 2: only `status === "ready"` tracks with a `path` are
+  // fetchable — `pending`/`failed` ones (still transcribing, or errored)
+  // have nothing behind them yet. Memoized on `captions`/`client.baseUrl`
+  // so `VideoPlayer`'s own caption-loading effect (keyed on this same
+  // array) doesn't refetch on every render of this screen.
+  const captionTrackOptions = useMemo<CaptionTrackOption[]>(
+    () =>
+      captions
+        .filter((c) => c.status === "ready" && !!c.path && !!c.id && !!c.language)
+        .map((c) => ({
+          id: c.id as string,
+          language: c.language as string,
+          label: `${(c.language as string).toUpperCase()}${c.is_auto ? " (auto)" : ""}`,
+          url: resolveMediaUrl(client.baseUrl, c.path) ?? "",
+        }))
+        .filter((track) => track.url.length > 0),
+    [captions, client.baseUrl]
+  );
+
+  function seekToChapter(startS: number): void {
+    playerRef.current?.seekTo(startS);
   }
 
   function onPlaybackEnded(): void {
@@ -378,6 +438,7 @@ export default function WatchScreen() {
         ) : (
           <VideoPlayer
             key={video.id}
+            ref={playerRef}
             src={localPlaybackUri ?? resolveMediaUrl(client.baseUrl, video.playback_url)}
             poster={resolveMediaUrl(client.baseUrl, video.thumbnail_path)}
             title={video.title ?? undefined}
@@ -391,6 +452,8 @@ export default function WatchScreen() {
               playerStateRef.current = { currentTimeS: s.currentTimeS, isPlaying: s.isPlaying };
             }}
             onRequestCollapse={onRequestCollapse}
+            captionTracks={captionTrackOptions}
+            captionStyle={settings.captionStyle}
           />
         )}
 
@@ -442,6 +505,37 @@ export default function WatchScreen() {
               {video.description}
             </Text>
           ) : null}
+
+          {chapters.length > 0 ? (
+            // M3 chunk 2: an empty chapter list renders nothing at all —
+            // unlike the web's scaffolding stub, there's no "this video has
+            // no chapters" placeholder to show (PLAN.md §17.1's task packet,
+            // "an empty real list is just absent UI").
+            <View style={{ marginTop: theme.spacing[4] }} testID="chapters-list">
+              <Text style={{ color: theme.colors.text, fontSize: theme.fontSize.md, fontWeight: "600" }}>
+                Chapters
+              </Text>
+              {chapters.map((chapter) => (
+                <Pressable
+                  key={chapter.id ?? `chapter-${chapter.start_s}`}
+                  onPress={() => seekToChapter(chapter.start_s)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${chapter.title}, ${formatDuration(chapter.start_s)}`}
+                  style={[styles.chapterRow, { paddingVertical: theme.spacing[2] }]}
+                >
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: theme.fontSize.sm, width: 56 }}>
+                    {formatDuration(chapter.start_s)}
+                  </Text>
+                  <Text
+                    style={{ color: theme.colors.text, fontSize: theme.fontSize.sm, flex: 1, marginLeft: theme.spacing[2] }}
+                    numberOfLines={1}
+                  >
+                    {chapter.title}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         <View style={{ paddingHorizontal: theme.spacing[4] }}>
@@ -489,5 +583,9 @@ const styles = StyleSheet.create({
   channelMeta: {
     flex: 1,
     minWidth: 0,
+  },
+  chapterRow: {
+    flexDirection: "row",
+    alignItems: "center",
   },
 });

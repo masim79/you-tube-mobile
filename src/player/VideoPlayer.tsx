@@ -1,7 +1,7 @@
 import { useEvent, useEventListener } from "expo";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { isPictureInPictureSupported, useVideoPlayer, VideoView, type VideoSource } from "expo-video";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   Image,
   Modal,
@@ -15,6 +15,7 @@ import { GestureDetector } from "react-native-gesture-handler";
 
 import { useTheme } from "../theme/ThemeProvider";
 import { formatDuration } from "../ui/format";
+import { findActiveCueText, parseCaptionCues, type CaptionCue } from "./captionCues";
 import { PLAYER_CHROME } from "./playerChrome";
 import { PLAYBACK_RATE_STEPS, qualityOptionsFromHeights, type QualityId } from "./qualityOptions";
 import { useVideoGestures } from "./useVideoGestures";
@@ -23,6 +24,32 @@ export interface VideoPlaybackState {
   currentTimeS: number;
   isPlaying: boolean;
   durationS: number;
+}
+
+/**
+ * One ready, fetchable `.vtt`/`.srt` track from `GET /videos/{id}/captions`
+ * — already filtered to `status === "ready"` && `path` set, and `path`
+ * already resolved to an absolute URL via `resolveMediaUrl`, by the caller
+ * (`watch/[id].tsx`), same as every other media path in this app.
+ */
+export interface CaptionTrackOption {
+  id: string;
+  language: string;
+  label: string;
+  url: string;
+}
+
+/** Mirrors `SettingsContext.CaptionStyle`'s shape structurally (not imported, to keep `player/` free of a dependency on `store/`) — `watch/[id].tsx` passes `settings.captionStyle` straight through. */
+export interface CaptionStyleOption {
+  fontSize: "small" | "medium" | "large";
+  backgroundEnabled: boolean;
+}
+
+const DEFAULT_CAPTION_STYLE: CaptionStyleOption = { fontSize: "medium", backgroundEnabled: true };
+
+/** Imperative handle for actions a parent screen needs to trigger on the player directly — currently just the chapters list's exact seek-by-chapter (PLAN.md §17.1), distinct from the gesture layer's relative ±10s seek. */
+export interface VideoPlayerHandle {
+  seekTo: (positionS: number) => void;
 }
 
 export interface VideoPlayerProps {
@@ -56,6 +83,10 @@ export interface VideoPlayerProps {
   /** Swipe-down gesture or the explicit mini-player button — absent/no-op in compact mode (nothing to collapse further to). */
   onRequestCollapse?: (state: { positionS: number; isPlaying: boolean }) => void;
   onPlaybackError?: (message: string) => void;
+  /** `GET /videos/{id}/captions`, pre-filtered to ready tracks — see `CaptionTrackOption`. Empty/absent hides the CC button entirely (mirrors `qualities`/`compact`: nothing to offer, nothing shown). */
+  captionTracks?: readonly CaptionTrackOption[];
+  /** `SettingsContext`'s `captionStyle` — applied to whichever cue is currently active. */
+  captionStyle?: CaptionStyleOption;
 }
 
 const CONTROLS_AUTO_HIDE_MS = 3000;
@@ -93,22 +124,27 @@ const MAX_RATE = PLAYBACK_RATE_STEPS[PLAYBACK_RATE_STEPS.length - 1] ?? 2;
  * a time, but say nothing about two concurrent now-playing sessions —
  * unverified without a device; flagged for a later chunk if it misbehaves.
  */
-export function VideoPlayer({
-  src,
-  poster = null,
-  title,
-  channelName = null,
-  qualities = [],
-  startAtS = null,
-  initialQuality = "auto",
-  compact = false,
-  autoplayOnAttach = false,
-  loop = false,
-  onPlaybackEnded,
-  onPlaybackStateChange,
-  onRequestCollapse,
-  onPlaybackError,
-}: VideoPlayerProps) {
+export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(function VideoPlayer(
+  {
+    src,
+    poster = null,
+    title,
+    channelName = null,
+    qualities = [],
+    startAtS = null,
+    initialQuality = "auto",
+    compact = false,
+    autoplayOnAttach = false,
+    loop = false,
+    onPlaybackEnded,
+    onPlaybackStateChange,
+    onRequestCollapse,
+    onPlaybackError,
+    captionTracks = [],
+    captionStyle = DEFAULT_CAPTION_STYLE,
+  }: VideoPlayerProps,
+  ref
+) {
   const theme = useTheme();
 
   const player = useVideoPlayer(null, (p) => {
@@ -169,6 +205,20 @@ export function VideoPlayer({
     }
   }
 
+  // Exact seek for the watch screen's chapters list ("seek-by-chapter",
+  // PLAN.md §17.1) — the gesture layer's own seek is a relative ±10s delta
+  // (`seekBy` below), not an absolute position, so this is a separate
+  // imperative entry point rather than a reuse of that gesture math.
+  useImperativeHandle(
+    ref,
+    () => ({
+      seekTo: (positionS: number) => {
+        player.currentTime = Math.max(0, positionS);
+      },
+    }),
+    [player]
+  );
+
   const { isPlaying } = useEvent(player, "playingChange", { isPlaying: player.playing });
   const { playbackRate } = useEvent(player, "playbackRateChange", { playbackRate: player.playbackRate });
 
@@ -206,6 +256,66 @@ export function VideoPlayer({
     onPlaybackStateChange?.({ currentTimeS, isPlaying, durationS });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTimeS, isPlaying, durationS]);
+
+  // Captions (§17.1 "Captions toggle with styling") — off by default,
+  // matching the web's own documented "cosmetic, off by default" intent
+  // before this chunk made it real. `null` means off; otherwise an id into
+  // `captionTracks`. `captionCues` is this track's parsed `.vtt`/`.srt`
+  // (see `captionCues.ts`'s header comment for why this app parses the
+  // file itself rather than handing `expo-video` a URL) — refetched
+  // whenever the selection changes, and cleared when it's turned off.
+  const [captionsMenuOpen, setCaptionsMenuOpen] = useState(false);
+  const [selectedCaptionTrackId, setSelectedCaptionTrackId] = useState<string | null>(null);
+  const [captionCues, setCaptionCues] = useState<CaptionCue[]>([]);
+
+  useEffect(() => {
+    const track = selectedCaptionTrackId
+      ? captionTracks.find((t) => t.id === selectedCaptionTrackId)
+      : undefined;
+    if (!track) {
+      setCaptionCues([]);
+      return;
+    }
+    let cancelled = false;
+    setCaptionCues([]);
+    fetch(track.url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.text();
+      })
+      .then((text) => {
+        if (!cancelled) setCaptionCues(parseCaptionCues(text));
+      })
+      .catch(() => {
+        if (!cancelled) setCaptionCues([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCaptionTrackId, captionTracks]);
+
+  // Reuses the `timeUpdate`-driven `currentTimeS` state above rather than a
+  // second position-polling loop — the same state already feeds
+  // `onPlaybackStateChange` and the seek-bar fill below.
+  const activeCaptionText = useMemo(
+    () => findActiveCueText(captionCues, currentTimeS),
+    [captionCues, currentTimeS]
+  );
+  const captionFontSizePx =
+    captionStyle.fontSize === "small"
+      ? theme.fontSize.sm
+      : captionStyle.fontSize === "large"
+        ? theme.fontSize.lg
+        : theme.fontSize.md;
+
+  function toggleOrOpenCaptionsMenu(): void {
+    if (captionTracks.length <= 1) {
+      setSelectedCaptionTrackId((prev) => (prev ? null : captionTracks[0]?.id ?? null));
+    } else {
+      setCaptionsMenuOpen(true);
+    }
+  }
 
   const qualityOptions = useMemo(
     () => qualityOptionsFromHeights(trackHeights.length > 0 ? trackHeights : qualities),
@@ -390,6 +500,31 @@ export function VideoPlayer({
         </View>
       ) : null}
 
+      {/*
+        Captions overlay — deliberately rendered outside the
+        `controlsVisible`-gated chrome below, so cues stay on screen while
+        the auto-hiding controls are hidden (mirrors every real player,
+        captions aren't "chrome"). Hidden in PiP for the same reason the
+        HUDs/seek-flash above are: no room in the shrunk floating window.
+      */}
+      {!compact && !isInPictureInPicture && activeCaptionText ? (
+        <View pointerEvents="none" style={styles.captionWrap}>
+          <Text
+            style={[
+              styles.captionText,
+              {
+                color: PLAYER_CHROME.text,
+                fontSize: captionFontSizePx,
+                fontFamily: theme.fontFamily,
+                backgroundColor: captionStyle.backgroundEnabled ? `${PLAYER_CHROME.background}cc` : "transparent",
+              },
+            ]}
+          >
+            {activeCaptionText}
+          </Text>
+        </View>
+      ) : null}
+
       {compact ? (
         <Pressable
           onPress={togglePlay}
@@ -458,6 +593,26 @@ export function VideoPlayer({
                 >
                   <Text style={{ color: PLAYER_CHROME.text, fontSize: theme.fontSize.sm }}>{playbackRate}x</Text>
                 </Pressable>
+                {captionTracks.length > 0 ? (
+                  <Pressable
+                    onPress={toggleOrOpenCaptionsMenu}
+                    accessibilityRole="button"
+                    accessibilityLabel="Captions"
+                    accessibilityState={{ selected: !!selectedCaptionTrackId }}
+                    hitSlop={8}
+                    style={{ marginLeft: theme.spacing[3] }}
+                  >
+                    <Text
+                      style={{
+                        color: selectedCaptionTrackId ? theme.colors.accent : PLAYER_CHROME.text,
+                        fontSize: theme.fontSize.sm,
+                        fontWeight: "700",
+                      }}
+                    >
+                      CC
+                    </Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   onPress={() => setQualityMenuOpen(true)}
                   accessibilityRole="button"
@@ -563,9 +718,34 @@ export function VideoPlayer({
           onPress: () => setRate(rate),
         }))}
       />
+      <OptionSheet
+        visible={captionsMenuOpen}
+        title="Captions"
+        onClose={() => setCaptionsMenuOpen(false)}
+        options={[
+          {
+            key: "off",
+            label: "Off",
+            selected: !selectedCaptionTrackId,
+            onPress: () => {
+              setSelectedCaptionTrackId(null);
+              setCaptionsMenuOpen(false);
+            },
+          },
+          ...captionTracks.map((track) => ({
+            key: track.id,
+            label: track.label,
+            selected: track.id === selectedCaptionTrackId,
+            onPress: () => {
+              setSelectedCaptionTrackId(track.id);
+              setCaptionsMenuOpen(false);
+            },
+          })),
+        ]}
+      />
     </>
   );
-}
+});
 
 interface OptionSheetProps {
   visible: boolean;
@@ -574,7 +754,7 @@ interface OptionSheetProps {
   options: { key: string; label: string; selected: boolean; onPress: () => void }[];
 }
 
-/** Minimal bottom-sheet-style option list for the quality/speed menus — kept local to `player/` rather than added to `ui/`, since nothing else needs it yet. */
+/** Minimal bottom-sheet-style option list for the quality/speed/captions menus — kept local to `player/` rather than added to `ui/`, since nothing else needs it yet. */
 function OptionSheet({ visible, title, onClose, options }: OptionSheetProps) {
   const theme = useTheme();
   return (
@@ -649,6 +829,20 @@ const styles = StyleSheet.create({
   },
   hudLeft: { left: "10%" },
   hudRight: { right: "10%" },
+  captionWrap: {
+    position: "absolute",
+    left: "6%",
+    right: "6%",
+    bottom: "16%",
+    alignItems: "center",
+  },
+  captionText: {
+    textAlign: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    overflow: "hidden",
+  },
   compactPlayButton: {
     position: "absolute",
     right: 6,
