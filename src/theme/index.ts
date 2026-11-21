@@ -2,6 +2,15 @@ import { dark, light, type ThemeName, type ThemeTokens } from "./tokens.generate
 
 export type { ThemeName };
 
+/**
+ * The user-facing theme *preference* (M2 chunk 2's Settings screen,
+ * PLAN.md §17.1's "Theme light/dark/system" row) — `ThemeName` itself
+ * stays exactly what `tokens.generated.ts` produces (never hand-edited,
+ * per that file's own header), so `"system"` is layered on top in
+ * `ThemeProvider.tsx` rather than added to the generated type.
+ */
+export type ThemeSetting = ThemeName | "system";
+
 /** Strips a trailing CSS unit (`"12px"` -> `12`) for React Native's unitless layout numbers. */
 function toNumber(value: string): number {
   const n = Number.parseFloat(value);

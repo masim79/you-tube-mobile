@@ -6,12 +6,18 @@ import { MiniPlayer } from "../player/MiniPlayer";
 import { MiniPlayerProvider } from "../player/miniPlayerStore";
 import { AuthProvider } from "../store/AuthContext";
 import { ServerProvider } from "../store/ServerContext";
+import { SettingsProvider } from "../store/SettingsContext";
 import { ThemeProvider } from "../theme/ThemeProvider";
 
 /**
  * Provider order matters: `AuthProvider` reads `useServer()`, so
  * `ServerProvider` must be the outer one. `Bootstrap` (inside both)
  * decides the first route on every launch (PLAN.md §17.6, Gate M-A).
+ *
+ * `SettingsProvider` sits directly inside `ThemeProvider` (and outside
+ * everything else) — it calls `useThemeControls()` to apply the persisted
+ * theme preference once its `AsyncStorage` read resolves (M2 chunk 2), and
+ * nothing below it needs to exist first for that.
  *
  * `GestureHandlerRootView` is required once, at the true root, for
  * `react-native-gesture-handler`'s gestures to work anywhere in the tree —
@@ -28,14 +34,16 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
-        <ServerProvider>
-          <AuthProvider>
-            <MiniPlayerProvider>
-              <Bootstrap />
-              <MiniPlayer />
-            </MiniPlayerProvider>
-          </AuthProvider>
-        </ServerProvider>
+        <SettingsProvider>
+          <ServerProvider>
+            <AuthProvider>
+              <MiniPlayerProvider>
+                <Bootstrap />
+                <MiniPlayer />
+              </MiniPlayerProvider>
+            </AuthProvider>
+          </ServerProvider>
+        </SettingsProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );

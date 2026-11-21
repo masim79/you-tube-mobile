@@ -37,6 +37,14 @@ export interface VideoPlayerProps {
   qualities?: readonly number[];
   /** Resume position (`Video.resume_position_s`) — seeked to once, on the first `sourceLoad`. */
   startAtS?: number | null;
+  /**
+   * Seeds the quality picker's initial selection (M2 chunk 2's
+   * network-aware default quality, PLAN.md §17.1) — applied once, the
+   * same way `startAtS` is, and never re-applied afterwards, so a manual
+   * pick from the quality menu later in the session is never clobbered.
+   * Defaults to `"auto"`, same as the menu's own default.
+   */
+  initialQuality?: QualityId;
   /** Mini-player widget mode: no gesture surface, no quality/speed/fullscreen/mini-player controls — just play/pause. */
   compact?: boolean;
   /** Starts playing as soon as the source loads, instead of paused (mini-player widget only). */
@@ -92,6 +100,7 @@ export function VideoPlayer({
   channelName = null,
   qualities = [],
   startAtS = null,
+  initialQuality = "auto",
   compact = false,
   autoplayOnAttach = false,
   loop = false,
@@ -202,7 +211,24 @@ export function VideoPlayer({
     () => qualityOptionsFromHeights(trackHeights.length > 0 ? trackHeights : qualities),
     [trackHeights, qualities]
   );
-  const [selectedQuality, setSelectedQuality] = useState<QualityId>("auto");
+  const [selectedQuality, setSelectedQuality] = useState<QualityId>(initialQuality);
+  const initialQualityAppliedRef = useRef(false);
+
+  // Applies the seeded `initialQuality` to the player exactly once — a
+  // plain `useState` initializer already covers the picker's own label,
+  // but `player.maxResolution` is a player-side effect that has to run
+  // after `useVideoPlayer` constructs the player, same reasoning as
+  // `startAtS`'s `resumedRef` above. Guarded by a ref rather than keyed
+  // on `selectedQuality` so a later *manual* pick from the quality menu
+  // (which also updates `selectedQuality`) is never re-applied here.
+  useEffect(() => {
+    if (initialQualityAppliedRef.current) return;
+    initialQualityAppliedRef.current = true;
+    if (initialQuality !== "auto") {
+      player.maxResolution = { width: 100000, height: initialQuality };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player]);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isZoomed, setIsZoomed] = useState(false);

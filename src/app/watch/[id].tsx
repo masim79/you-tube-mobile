@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { NetworkStateType, useNetworkState } from "expo-network";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -11,6 +12,7 @@ import { SubscribeControl } from "../../engagement/SubscribeControl";
 import { useMiniPlayer } from "../../player/miniPlayerStore";
 import { VideoPlayer } from "../../player/VideoPlayer";
 import { useAuth } from "../../store/AuthContext";
+import { useSettings } from "../../store/SettingsContext";
 import { useTheme } from "../../theme/ThemeProvider";
 import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
@@ -42,13 +44,23 @@ function makeSessionId(): string {
  * an 8s progress-save timer and a 10s view-heartbeat timer (only counted
  * while playing), and autoplay-next from the first related video.
  *
+ * M2 chunk 2 closes chunk 4's documented autoplay gap: autoplay-next now
+ * reads `settings.autoplayNext` (mirrors the web's `AutoplayPreferenceService`,
+ * default on) instead of always firing, and Data Saver additionally
+ * suppresses it specifically while on cellular (Wi-Fi autoplay is
+ * unaffected either way — see `onPlaybackEnded`). The same chunk also
+ * seeds the quality picker from `settings.defaultQualityWifi`/
+ * `defaultQualityCellular` based on the live network type via
+ * `expo-network`'s `useNetworkState()` — computed once per video (the
+ * existing `key={video.id}` below already remounts `VideoPlayer` per
+ * video, so this only ever applies at the start of a session, never
+ * clobbering a manual pick from the quality menu mid-playback). Data Saver
+ * also overrides the effective cellular quality to a fixed conservative
+ * cap regardless of `defaultQualityCellular`'s own stored value — see
+ * `effectiveQuality` below.
+ *
  * Simplifications relative to the web page, noted rather than silently
  * dropped (same convention as `channel/[handle].tsx`'s file-header comment):
- *  - **No persisted autoplay-next preference.** The web honours
- *    `AutoplayPreferenceService`; mobile has no Settings screen yet (that's
- *    M2, per PLAN.md §17.1's "Settings" row) to store the toggle in, so
- *    autoplay-next always runs here. A later chunk wiring Settings should
- *    gate this the same way the web does.
  *  - **Engagement (M1 chunk 6)** — like/dislike, subscribe + bell levels,
  *    comments, share, save — is wired via `ActionPills`/`SubscribeControl`/
  *    `CommentsSheet` in `src/engagement/`, not inline here. `SubscribeControl`
@@ -67,7 +79,21 @@ export default function WatchScreen() {
   const client = useApiClient();
   const miniPlayer = useMiniPlayer();
   const { isAuthenticated } = useAuth();
+  const settings = useSettings();
+  const networkState = useNetworkState();
   const { id } = useLocalSearchParams<{ id: string }>();
+
+  const isCellular = networkState.type === NetworkStateType.CELLULAR;
+  // §17.1 Settings "data saver": caps cellular playback to a fixed
+  // conservative quality regardless of what `defaultQualityCellular`
+  // itself is set to — picked as "a concrete effect" per M2 chunk 2's
+  // brief, distinct from the plain `defaultQualityCellular` preference.
+  const DATA_SAVER_CELLULAR_CAP = 360;
+  const effectiveQuality = isCellular
+    ? settings.dataSaver
+      ? DATA_SAVER_CELLULAR_CAP
+      : settings.defaultQualityCellular
+    : settings.defaultQualityWifi;
 
   const [state, setState] = useState<PageState>({ kind: "loading" });
   const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
@@ -212,7 +238,11 @@ export default function WatchScreen() {
       lastSavedPositionRef.current = positionS;
       void updateProgress(client, video.id, positionS).catch(() => undefined);
     }
-    goToNextVideo(); // always-on autoplay-next — see file-header doc comment.
+    // §17.1 Settings "autoplay" + "data saver" — see file-header doc
+    // comment: the toggle gates it outright, and Data Saver additionally
+    // suppresses it while on cellular regardless of the toggle.
+    const autoplayAllowed = settings.autoplayNext && !(settings.dataSaver && isCellular);
+    if (autoplayAllowed) goToNextVideo();
   }
 
   function onRequestCollapse({ positionS, isPlaying }: { positionS: number; isPlaying: boolean }): void {
@@ -312,6 +342,7 @@ export default function WatchScreen() {
             channelName={video.channel_name ?? null}
             qualities={video.qualities ?? []}
             startAtS={resumeOverrideS ?? video.resume_position_s ?? null}
+            initialQuality={effectiveQuality}
             autoplayOnAttach
             onPlaybackEnded={onPlaybackEnded}
             onPlaybackStateChange={(s) => {
