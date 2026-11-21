@@ -31,6 +31,14 @@ function messageFromErrorBody(body: ErrorBody | null): string {
 
 export interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+  /**
+   * A plain JSON-serializable value for every existing endpoint, or a
+   * `FormData` instance for the one multipart endpoint this app calls
+   * (`POST /videos/{id}/thumbnail` — §20.8/openapi.yaml's
+   * `multipart/form-data` requestBody). Checked at runtime below rather
+   * than split into two options, so call sites don't need a different
+   * method name for the one-off multipart case.
+   */
   body?: unknown;
   accessToken?: string | null;
   /** Omit when the caller is probing a candidate server URL at setup time. */
@@ -51,11 +59,18 @@ export async function apiFetch<T>(
   path: string,
   options: RequestOptions = {}
 ): Promise<T> {
+  // `FormData` is RN's own global (not `multipart/form-data`-aware fetch
+  // polyfill magic) — passing it straight to `fetch`'s `body` and omitting
+  // `Content-Type` lets RN's networking layer set the header itself,
+  // boundary included. Setting it manually here would omit that boundary
+  // and the server would fail to parse the body at all.
+  const isFormData = options.body instanceof FormData;
+
   const headers: Record<string, string> = {
     Accept: "application/json",
     "X-Client": X_CLIENT_HEADER,
   };
-  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+  if (options.body !== undefined && !isFormData) headers["Content-Type"] = "application/json";
   if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
 
   let response: Response;
@@ -63,7 +78,12 @@ export async function apiFetch<T>(
     response = await fetch(`${baseUrl.replace(/\/+$/, "")}/api${path}`, {
       method: options.method ?? "GET",
       headers,
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body:
+        options.body === undefined
+          ? undefined
+          : isFormData
+            ? (options.body as FormData)
+            : JSON.stringify(options.body),
       signal: options.signal,
     });
   } catch (cause) {

@@ -10,7 +10,14 @@ import { Screen } from "../../ui/Screen";
 import { useTheme } from "../../theme/ThemeProvider";
 import { useAuth } from "../../store/AuthContext";
 
-type RowHref = "/you/history" | "/you/watch-later" | "/you/liked" | "/you/playlists" | "/settings";
+type RowHref =
+  | "/you/history"
+  | "/you/watch-later"
+  | "/you/liked"
+  | "/you/playlists"
+  | "/you/videos"
+  | "/you/comments"
+  | "/settings";
 
 interface RowDef {
   key: string;
@@ -25,11 +32,12 @@ const ROWS: RowDef[] = [
   { key: "watch-later", label: "Watch Later", glyph: "🕓", href: "/you/watch-later" },
   { key: "liked", label: "Liked videos", glyph: "👍", href: "/you/liked" },
   { key: "playlists", label: "Playlists", glyph: "▤", href: "/you/playlists" },
-  // Stubs — PLAN.md §17.1: Studio-lite (M2 chunk 3) builds "Your videos";
-  // Offline/downloads (M2 chunk 4) builds "Downloads". Neither has landed
-  // yet, so these are honest "coming soon" rows rather than dead links or
-  // invented screens.
-  { key: "your-videos", label: "Your videos", glyph: "🎬" },
+  // Studio-lite (M2 chunk 3, PLAN.md §17.1) fills in "Your videos" and
+  // "Comments" — both wired below. "Downloads" is still a stub:
+  // Offline/downloads (M2 chunk 4) hasn't landed yet, so it stays an
+  // honest "coming soon" row rather than a dead link or invented screen.
+  { key: "your-videos", label: "Your videos", glyph: "🎬", href: "/you/videos" },
+  { key: "studio-comments", label: "Comments", glyph: "💬", href: "/you/comments" },
   { key: "downloads", label: "Downloads", glyph: "⬇" },
   { key: "settings", label: "Settings", glyph: "⚙", href: "/settings" },
 ];
