@@ -1,3 +1,4 @@
+import { File } from "expo-file-system";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { NetworkStateType, useNetworkState } from "expo-network";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -6,6 +7,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { ApiError } from "../../api/http";
 import { useApiClient } from "../../api/useApiClient";
 import { getRelatedVideos, getVideo, recordView, updateProgress, type Video } from "../../api/videos";
+import { getDownloadForVideo } from "../../downloads/downloadRegistry";
 import { ActionPills } from "../../engagement/ActionPills";
 import { CommentsSheet } from "../../engagement/CommentsSheet";
 import { SubscribeControl } from "../../engagement/SubscribeControl";
@@ -100,6 +102,24 @@ export default function WatchScreen() {
   const [relatedLoading, setRelatedLoading] = useState(false);
   /** Set once, right after reclaiming inline playback from the mini player — see `expandFromMiniPlayer`. */
   const [resumeOverrideS, setResumeOverrideS] = useState<number | null>(null);
+  /**
+   * `file://` URI of this video's on-device download (M2 chunk 4,
+   * `downloads/downloadRegistry.ts`), when one exists and its file is
+   * still actually there — `null` otherwise, which falls back to the
+   * normal streamed `playback_url` below. Checked once per `id`, same
+   * granularity as the poll-while-processing effect; a download that
+   * finishes *while* this exact screen is already open is not picked up
+   * until the next visit, a deliberate "minimal wiring" simplification
+   * per this chunk's task packet rather than a second live subscription.
+   * Also unaddressed: a downloaded file is one fixed rendition, not an
+   * HLS master playlist, so `VideoPlayer`'s quality menu below still
+   * lists the video's *streamable* renditions and silently no-ops when a
+   * different one is picked while playing locally — not restructuring
+   * `VideoPlayer` itself to hide/disable that menu for a local source was
+   * the minimal-wiring tradeoff this chunk's task packet explicitly
+   * allowed ("wire this minimally, don't restructure the player").
+   */
+  const [localPlaybackUri, setLocalPlaybackUri] = useState<string | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
   /** Seeded from `video.comment_count` once ready, then adjusted locally as the comments sheet posts/deletes — see the reset in the id-keyed effect below. */
   const [commentCountOverride, setCommentCountOverride] = useState<number | null>(null);
@@ -152,6 +172,7 @@ export default function WatchScreen() {
     setRelatedVideos([]);
     setCommentsOpen(false);
     setCommentCountOverride(null);
+    setLocalPlaybackUri(null);
 
     async function poll(): Promise<void> {
       try {
@@ -186,6 +207,27 @@ export default function WatchScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, client.request, loadRelated]);
+
+  // M2 chunk 4: prefer a local on-device download over streaming, when one
+  // exists for this exact video and its file hasn't disappeared out from
+  // under the registry (see `localPlaybackUri`'s own doc comment above).
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void getDownloadForVideo(id).then((entry) => {
+      if (cancelled || !entry) return;
+      let exists = false;
+      try {
+        exists = new File(entry.localPath).exists;
+      } catch {
+        exists = false;
+      }
+      if (!cancelled) setLocalPlaybackUri(exists ? entry.localPath : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   // Progress-save (8s) + view-heartbeat (10s) timers, set up once per mount
   // (not per `id` — `readyVideoRef` always has the current video) with a
@@ -336,7 +378,7 @@ export default function WatchScreen() {
         ) : (
           <VideoPlayer
             key={video.id}
-            src={resolveMediaUrl(client.baseUrl, video.playback_url)}
+            src={localPlaybackUri ?? resolveMediaUrl(client.baseUrl, video.playback_url)}
             poster={resolveMediaUrl(client.baseUrl, video.thumbnail_path)}
             title={video.title ?? undefined}
             channelName={video.channel_name ?? null}

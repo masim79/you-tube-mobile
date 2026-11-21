@@ -3,6 +3,7 @@ import { Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-nati
 
 import { addToWatchLater, postReaction, removeFromWatchLater, type Video } from "../api/videos";
 import { useApiClient } from "../api/useApiClient";
+import { DownloadButton } from "../downloads/DownloadButton";
 import { formatCompactNumber } from "../ui/format";
 import { useTheme } from "../theme/ThemeProvider";
 
@@ -175,11 +176,18 @@ export function ActionPills({ video, commentCount, isAuthenticated, onRequireAut
         onPress={onOpenComments}
         testID="action-comments"
       />
+
+      {/* Offline downloads (M2 chunk 4, PLAN.md §17.1) — placed last in the
+          row, matching the YouTube app's own Download entry point sitting
+          after the engagement actions. Self-contained: owns its own
+          quality-picker sheet and progress state, so this call site is the
+          entire integration. */}
+      <DownloadButton video={video} isAuthenticated={isAuthenticated} onRequireAuth={onRequireAuth} />
     </ScrollView>
   );
 }
 
-function Pill({
+export function Pill({
   label,
   icon,
   onPress,

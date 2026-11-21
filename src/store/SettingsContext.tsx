@@ -18,13 +18,16 @@ import type { ThemeSetting } from "../theme";
  * than the keychain-backed `expo-secure-store` `secureStorage.ts` uses for
  * the refresh token (§20.2) — same tier as `recentSearches.ts`.
  *
- * Two fields are stored now but not wired to anything yet, documented
+ * One field is stored now but not wired to anything yet, documented
  * plainly rather than faked:
- *  - `downloadQuality` — for M2 chunk 4's Offline/downloads feature,
- *    which doesn't exist yet.
  *  - `captionStyle` — for M3's caption renderer, which doesn't exist yet;
  *    there's nothing on screen today for a font-size/background toggle to
  *    visibly affect.
+ *
+ * `downloadQuality` and `downloadOverWifiOnly` were both "stored but not
+ * consumed" through M2 chunk 3; M2 chunk 4 (Offline downloads,
+ * `src/downloads/`) is what reads them now — see `DownloadButton.tsx` and
+ * `downloadManager.ts`.
  */
 export interface CaptionStyle {
   fontSize: "small" | "medium" | "large";
@@ -47,8 +50,16 @@ export interface Settings {
   dataSaver: boolean;
   defaultQualityWifi: QualityId;
   defaultQualityCellular: QualityId;
-  /** Not yet consumed — see file header. */
+  /** Default quality offered first in `DownloadButton`'s picker (M2 chunk 4) — the picker still lets the viewer choose a different available quality per download. */
   downloadQuality: QualityId;
+  /**
+   * §17.1's "download-over-Wi-Fi-only" — blocks starting a new download
+   * while on cellular when `true` (default, matching the YouTube app's own
+   * default). Data Saver and this toggle are independent: Data Saver warns
+   * on a large cellular download even when this is off; this toggle blocks
+   * outright regardless of size. See `DownloadButton.tsx`.
+   */
+  downloadOverWifiOnly: boolean;
   /** Not yet consumed — see file header. */
   captionStyle: CaptionStyle;
 }
@@ -60,6 +71,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultQualityWifi: "auto",
   defaultQualityCellular: 480,
   downloadQuality: "auto",
+  downloadOverWifiOnly: true,
   captionStyle: { fontSize: "medium", backgroundEnabled: true },
 };
 

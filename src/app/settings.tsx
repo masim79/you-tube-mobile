@@ -37,10 +37,10 @@ const CAPTION_FONT_SIZE_CHOICES: { id: CaptionStyle["fontSize"]; label: string }
  * `SettingsContext`'s own hydration effect rather than being read/written
  * here directly.
  *
- * Download quality and caption style are collected here but not consumed
- * anywhere yet — M2 chunk 4 (Offline) and M3 (captions) are the features
- * that will read them; said so plainly in each section below rather than
- * faking a preview.
+ * Caption style is collected here but not consumed anywhere yet — M3 is
+ * the feature that will read it; said so plainly below rather than faking
+ * a preview. Download quality and the Wi-Fi-only toggle *are* consumed now,
+ * by M2 chunk 4's `src/downloads/DownloadButton.tsx`.
  */
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -137,8 +137,24 @@ export default function SettingsScreen() {
           testIDPrefix="settings-quality-download"
         />
         <Text style={{ color: theme.colors.textSecondary, fontSize: theme.fontSize.xs, marginTop: theme.spacing[1] }}>
-          Stored for the Offline/downloads feature, coming in a later update — nothing downloads yet.
+          The quality offered first when starting a new download from the Watch screen.
         </Text>
+
+        <View style={[styles.row, { paddingVertical: theme.spacing[3] }]}>
+          <View style={styles.rowLabel}>
+            <Text style={{ color: theme.colors.text, fontSize: theme.fontSize.md }}>Download over Wi-Fi only</Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: theme.fontSize.xs, marginTop: theme.spacing[1] }}>
+              Blocks starting a new download while on cellular.
+            </Text>
+          </View>
+          <Switch
+            testID="settings-download-wifi-only-switch"
+            value={settings.downloadOverWifiOnly}
+            onValueChange={(value) => settings.update("downloadOverWifiOnly", value)}
+            trackColor={switchTrackColor}
+            thumbColor={theme.colors.text}
+          />
+        </View>
 
         <View style={[styles.row, { paddingVertical: theme.spacing[3] }]}>
           <View style={styles.rowLabel}>

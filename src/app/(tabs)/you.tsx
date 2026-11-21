@@ -17,6 +17,7 @@ type RowHref =
   | "/you/playlists"
   | "/you/videos"
   | "/you/comments"
+  | "/you/downloads"
   | "/settings";
 
 interface RowDef {
@@ -33,12 +34,11 @@ const ROWS: RowDef[] = [
   { key: "liked", label: "Liked videos", glyph: "👍", href: "/you/liked" },
   { key: "playlists", label: "Playlists", glyph: "▤", href: "/you/playlists" },
   // Studio-lite (M2 chunk 3, PLAN.md §17.1) fills in "Your videos" and
-  // "Comments" — both wired below. "Downloads" is still a stub:
-  // Offline/downloads (M2 chunk 4) hasn't landed yet, so it stays an
-  // honest "coming soon" row rather than a dead link or invented screen.
+  // "Comments" — both wired below. Offline/downloads (M2 chunk 4) fills
+  // in "Downloads", pointing at the on-device library screen.
   { key: "your-videos", label: "Your videos", glyph: "🎬", href: "/you/videos" },
   { key: "studio-comments", label: "Comments", glyph: "💬", href: "/you/comments" },
-  { key: "downloads", label: "Downloads", glyph: "⬇" },
+  { key: "downloads", label: "Downloads", glyph: "⬇", href: "/you/downloads" },
   { key: "settings", label: "Settings", glyph: "⚙", href: "/settings" },
 ];
 

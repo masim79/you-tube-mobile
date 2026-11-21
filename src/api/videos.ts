@@ -188,3 +188,31 @@ export async function setThumbnail(client: ApiClient, id: string, payload: SetTh
 export function studioThumbnailCandidatePath(videoId: string, candidate: 0 | 1 | 2): string {
   return `/media/videos/${videoId}/thumb_${candidate}.jpg`;
 }
+
+// --------------------------------------------------------- Offline downloads (M2 chunk 4)
+
+export type DownloadOptions = components["schemas"]["DownloadOptions"];
+export type DownloadRequestResult = components["schemas"]["DownloadRequestResult"];
+
+/**
+ * `GET /videos/{id}/download/options` (§9.1). Requires auth (server 401s
+ * an anonymous caller). Real file sizes per quality so `DownloadButton` can
+ * warn before a large download — see `downloadManager.ts`.
+ */
+export async function getDownloadOptions(client: ApiClient, id: string): Promise<DownloadOptions> {
+  return client.request<DownloadOptions>(`/videos/${id}/download/options`);
+}
+
+/**
+ * `POST /videos/{id}/download?quality=` (§9.1). Returns the signed link
+ * immediately if the remux is already cached (`status: "ready"`), or
+ * `status: "preparing"` + `job_id` while the worker remuxes it — the
+ * contract's own description says the client polls this *same* endpoint
+ * again rather than a separate job-status route, which is what
+ * `downloadManager.ts`'s `resolveDownloadUrl` does.
+ */
+export async function requestDownload(client: ApiClient, id: string, quality: string): Promise<DownloadRequestResult> {
+  return client.request<DownloadRequestResult>(`/videos/${id}/download?quality=${encodeURIComponent(quality)}`, {
+    method: "POST",
+  });
+}
