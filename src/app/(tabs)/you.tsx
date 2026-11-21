@@ -19,6 +19,7 @@ type RowHref =
   | "/you/videos"
   | "/you/comments"
   | "/you/downloads"
+  | "/you/live"
   | "/settings";
 
 interface RowDef {
@@ -39,6 +40,10 @@ const ROWS: RowDef[] = [
   // in "Downloads", pointing at the on-device library screen.
   { key: "your-videos", label: "Your videos", glyph: "🎬", href: "/you/videos" },
   { key: "studio-comments", label: "Comments", glyph: "💬", href: "/you/comments" },
+  // M4 chunk 3 (PLAN.md §17.1 "Live"): stream key/RTMP URL, start/end,
+  // slow mode — not an in-app camera broadcaster, see `you/live.tsx`'s
+  // own doc comment for why.
+  { key: "go-live", label: "Go live", glyph: "🔴", href: "/you/live" },
   { key: "downloads", label: "Downloads", glyph: "⬇", href: "/you/downloads" },
   { key: "settings", label: "Settings", glyph: "⚙", href: "/settings" },
 ];

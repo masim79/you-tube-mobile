@@ -1,14 +1,16 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Image, Linking, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useApiClient } from "../../api/useApiClient";
 import { getChannel, getChannelVideos, type Channel } from "../../api/channels";
+import { getChannelLiveStatus, type LiveStream } from "../../api/live";
 import { useCursorPage, type Page } from "../../api/pagination";
 import { getVideo, type Video } from "../../api/videos";
 import { SubscribeControl } from "../../engagement/SubscribeControl";
 import { useAuth } from "../../store/AuthContext";
 import { Avatar } from "../../ui/Avatar";
+import { Button } from "../../ui/Button";
 import { Chip } from "../../ui/Chip";
 import { LoadingState } from "../../ui/LoadingState";
 import { Screen } from "../../ui/Screen";
@@ -70,6 +72,8 @@ export default function ChannelScreen() {
   const [notFound, setNotFound] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [featuredVideo, setFeaturedVideo] = useState<Video | null>(null);
+  /** `GET /channels/{id}/live` (M4 chunk 3) — fetched once alongside the channel itself, not polled on this screen; the live watch screen (`/live/[channelId]`) is the one that keeps polling once a viewer actually opens it. */
+  const [liveStatus, setLiveStatus] = useState<LiveStream | null>(null);
   /** +1/-1/0 vs. the subscriber count last fetched — kept by `SubscribeControl`'s `onSubscribedChange` so the header count tracks an optimistic toggle without a second `getChannel` round trip. */
   const [subscriberDelta, setSubscriberDelta] = useState(0);
 
@@ -116,6 +120,27 @@ export default function ChannelScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client.request, channel?.featured_video_id]);
+
+  useEffect(() => {
+    const id = channel?.id;
+    if (!id) {
+      setLiveStatus(null);
+      return;
+    }
+    let cancelled = false;
+    getChannelLiveStatus(client, id).then(
+      (stream) => {
+        if (!cancelled) setLiveStatus(stream);
+      },
+      () => {
+        if (!cancelled) setLiveStatus(null);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client.request, channel?.id]);
 
   const fetchVideosPage = useCallback(
     (cursor: string | null): Promise<Page<Video>> =>
@@ -197,6 +222,39 @@ export default function ChannelScreen() {
           </Text>
         </View>
       </View>
+
+      {liveStatus?.status === "live" && channel.id ? (
+        <Pressable
+          onPress={() =>
+            router.push({
+              pathname: "/live/[channelId]",
+              params: { channelId: channel.id as string, channelName: channel.name ?? "", channelHandle: channel.handle ?? "" },
+            })
+          }
+          accessibilityRole="button"
+          accessibilityLabel="Live now"
+          testID="channel-live-banner"
+          style={[
+            styles.liveBanner,
+            { backgroundColor: theme.colors.accent, borderRadius: theme.radius.md, marginTop: theme.spacing[3] },
+          ]}
+        >
+          <Text style={{ color: theme.colors.accentContrast, fontSize: theme.fontSize.sm, fontWeight: "700" }}>
+            🔴 LIVE now · {formatCompactNumber(liveStatus.viewer_count ?? 0)} watching
+          </Text>
+        </Pressable>
+      ) : null}
+
+      {isOwnChannel ? (
+        <View style={{ marginTop: theme.spacing[3] }}>
+          <Button
+            label={liveStatus?.status === "live" ? "Manage your live stream" : "Go live"}
+            variant="secondary"
+            onPress={() => router.push("/you/live")}
+            testID="channel-go-live"
+          />
+        </View>
+      ) : null}
 
       {!isOwnChannel && channel.id ? (
         <View style={{ marginTop: theme.spacing[3] }}>
@@ -400,5 +458,10 @@ const styles = StyleSheet.create({
   },
   tabRow: {
     flexDirection: "row",
+  },
+  liveBanner: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    alignItems: "center",
   },
 });
