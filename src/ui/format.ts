@@ -65,6 +65,42 @@ export function formatDuration(totalSeconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/**
+ * "1h 23m" / "45m" — a watch-time *total* (seconds) formatted for a stat
+ * card, matching the web's `studio/analytics/analytics-page.ts`
+ * `formatWatchTime` (M3 chunk 3, Creator Insights). Distinct from
+ * `formatDuration` above, which renders a single video's length/position
+ * as `h:mm:ss` — a watch-time total reads more naturally as "1h 23m" than
+ * "1:23:00".
+ */
+export function formatWatchTime(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.round(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
+}
+
+/** `YYYY-MM-DD`, the `date` query-param format `GET /studio/analytics` and `/studio/analytics/top-videos` require. */
+export function toIsoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Inclusive `{from, to}` range ending today, `days` days wide — the mobile
+ * translation of the web analytics page's date range (which exposes raw
+ * `<input type="date">` fields defaulting to a 28-day lookback via its own
+ * `defaultDateRange()`, not preset chips). Mobile's Insights screen offers
+ * 7/28/90-day presets instead of free-form date entry, with 28 as the
+ * default to match the web's own default window.
+ */
+export function dateRangeForPreset(days: number, now: Date = new Date()): { from: string; to: string } {
+  const to = new Date(now);
+  const from = new Date(to);
+  from.setDate(from.getDate() - (days - 1));
+  return { from: toIsoDate(from), to: toIsoDate(to) };
+}
+
 /** "812 MB", "1.3 GB" — binary-ish human file sizes, matching the web's
  * `pages/upload/upload-constants.ts` `formatFileSize` (upload progress UI, M1 chunk 7). */
 export function formatFileSize(bytes: number): string {

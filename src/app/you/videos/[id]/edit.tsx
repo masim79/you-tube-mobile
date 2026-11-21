@@ -247,6 +247,18 @@ export default function EditVideoScreen() {
               testID="edit-save"
             />
 
+            <Button
+              label="View insights"
+              variant="secondary"
+              onPress={() =>
+                router.push({
+                  pathname: "/you/videos/[id]/insights",
+                  params: { id: video.id ?? "", title: video.title ?? "", thumbnail: video.thumbnail_path ?? "" },
+                })
+              }
+              testID="edit-view-insights"
+            />
+
             <View style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: theme.spacing[4], gap: theme.spacing[3] }}>
               <Text style={{ color: theme.colors.text, fontSize: theme.fontSize.md, fontWeight: "600" }}>Thumbnail</Text>
 
