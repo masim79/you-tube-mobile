@@ -22,6 +22,21 @@ export interface VideoListProps {
   header?: React.ReactNode;
   emptyLabel?: string;
   testID?: string;
+  /**
+   * Overrides the default `item.id`-based key. Added for M2 chunk 1's
+   * library screens (History, Watch Later, Liked, Playlist detail), whose
+   * `items` are derived from a wrapping entry (`HistoryEntry`/
+   * `PlaylistItem`) rather than being the entry itself — the same video
+   * can legitimately appear under two different entries (rewatched twice,
+   * say), which would collide on `item.id` alone.
+   */
+  keyExtractor?: (item: Video, index: number) => string;
+  /**
+   * Renders an overlay in the top-right corner of each card — the per-item
+   * "remove" affordance M2 chunk 1's library screens need (e.g. unlike
+   * Home/Search/Channel, which never pass this and render unchanged).
+   */
+  trailingAction?: (item: Video, index: number) => React.ReactNode;
 }
 
 /**
@@ -47,12 +62,21 @@ export function VideoList({
   header,
   emptyLabel = "No videos yet.",
   testID,
+  keyExtractor,
+  trailingAction,
 }: VideoListProps) {
   const theme = useTheme();
 
-  const renderItem: ListRenderItem<Video> = ({ item }) => (
-    <VideoCard video={item} baseUrl={baseUrl} onPress={onPressVideo} onPressChannel={onPressChannel} />
-  );
+  const renderItem: ListRenderItem<Video> = ({ item, index }) => {
+    const card = <VideoCard video={item} baseUrl={baseUrl} onPress={onPressVideo} onPressChannel={onPressChannel} />;
+    if (!trailingAction) return card;
+    return (
+      <View style={styles.cardWrap}>
+        {card}
+        <View style={styles.trailingOverlay}>{trailingAction(item, index)}</View>
+      </View>
+    );
+  };
 
   // First paint (or a sort/query change that wiped the list): full
   // skeleton batch, no FlatList yet — §10.3's rule applies to the very
@@ -93,7 +117,7 @@ export function VideoList({
       testID={testID}
       style={styles.flex}
       data={items}
-      keyExtractor={(item, index) => item.id ?? String(index)}
+      keyExtractor={(item, index) => (keyExtractor ? keyExtractor(item, index) : item.id ?? String(index))}
       renderItem={renderItem}
       ListHeaderComponent={header ? <>{header}</> : undefined}
       ItemSeparatorComponent={() => <View style={{ height: theme.spacing[4] }} />}
@@ -123,5 +147,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  cardWrap: {
+    position: "relative",
+  },
+  trailingOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
   },
 });

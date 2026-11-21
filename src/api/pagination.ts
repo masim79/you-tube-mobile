@@ -25,6 +25,15 @@ export interface UseCursorPageResult<T> {
   reload: () => Promise<void>;
   /** Fetches the next page and appends. No-op while already loading, or once `hasMore` is false. */
   loadMore: () => Promise<void>;
+  /**
+   * Drops every item matching `predicate` from local state, without a
+   * refetch. Added for M2 chunk 1's library-management screens (History,
+   * Watch Later, Liked, Playlist detail) — each deletes one row via its own
+   * endpoint and then wants the list to reflect that immediately rather
+   * than reloading from `cursor: null` and losing scroll position. Additive
+   * and unused by M1's read-only feeds (Home/Search/Channel).
+   */
+  removeItem: (predicate: (item: T) => boolean) => void;
 }
 
 /**
@@ -81,5 +90,9 @@ export function useCursorPage<T>(
     }
   }, [fetchPage, isLoading, isLoadingMore, hasMore]);
 
-  return { items, isLoading, isLoadingMore, error, hasMore, reload, loadMore };
+  const removeItem = useCallback((predicate: (item: T) => boolean) => {
+    setItems((previous) => previous.filter((item) => !predicate(item)));
+  }, []);
+
+  return { items, isLoading, isLoadingMore, error, hasMore, reload, loadMore, removeItem };
 }
