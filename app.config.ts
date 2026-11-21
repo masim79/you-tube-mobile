@@ -74,6 +74,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // M1 chunk 7: the upload progress notification (`src/upload/uploadNotifications.ts`).
     // No custom icon/color/sound configured — the platform default is fine for a
     // transient progress notification.
+    //
+    // M3 chunk 1 (`src/notifications/pushRegistration.ts`) adds *remote*
+    // push on top of this same package, which needs
+    // `extra.eas.projectId` for `Notifications.getExpoPushTokenAsync()` to
+    // produce a real token — deliberately not set here. There is no EAS
+    // project for this app yet (`eas init`/`eas build:configure`, a
+    // deployment-account step needing a real Expo account and network
+    // access), so `registerForPushNotifications()` checks for this value
+    // and no-ops when it's absent rather than throwing. Set it here (and
+    // remove this comment) once that project exists.
     "expo-notifications",
     [
       "expo-video",

@@ -467,7 +467,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Added R2-P3 (§9.1). Short-lived signed token (10 minutes). Logs a downloads row and answers with X-Accel-Redirect so nginx streams the file from its internal-only location; never fetchable directly. */
+        /** @description Added R2-P3 (§9.1). Short-lived signed token (SIGNED_URL_TTL_MIN, 10 minutes by default). Logs a downloads row and answers with X-Accel-Redirect so nginx streams the file from its internal-only location; never fetchable directly. Changed 2026-11-21 (§17.6, §24): repeatable within the TTL window rather than single-use — the first successful fetch still records `downloaded_at` (an audit timestamp, never overwritten by a later fetch), but no longer gates later ones, so a dropped connection can be retried/ resumed by re-fetching the same link rather than failing with "already consumed". Revocation is TTL-only now; a leaked link is reusable for the rest of its (short) window, same tradeoff every other signed URL in this contract already accepts. */
         get: operations["fetchDownload"];
         put?: never;
         post?: never;
@@ -3195,7 +3195,7 @@ export interface operations {
                     "application/octet-stream": string;
                 };
             };
-            /** @description Token invalid, expired, or already consumed */
+            /** @description Token invalid or expired */
             404: {
                 headers: {
                     [name: string]: unknown;

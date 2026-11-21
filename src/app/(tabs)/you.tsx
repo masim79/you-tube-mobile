@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { useApiClient } from "../../api/useApiClient";
+import { unregisterPushNotifications } from "../../notifications/pushRegistration";
 import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
 import { resolveMediaUrl } from "../../ui/format";
@@ -58,6 +59,13 @@ export default function YouScreen() {
 
   async function handleLogout() {
     setLoggingOut(true);
+    // M3 chunk 1: unregister this device's push token *before* `logout()`
+    // clears the access token below — `DELETE /me/devices/{id}` requires
+    // auth, and a device left registered after sign-out would keep
+    // receiving another account's pushes on a shared/reset device.
+    // Best-effort by design (see `unregisterPushNotifications`'s doc
+    // comment) — never blocks the actual logout.
+    await unregisterPushNotifications(client);
     await logout();
     setLoggingOut(false);
     router.replace("/setup/login");
