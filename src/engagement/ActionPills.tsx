@@ -1,20 +1,14 @@
-import React, { useState } from "react";
-import { Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import React from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { addToWatchLater, postReaction, removeFromWatchLater, type Video } from "../api/videos";
+import type { Video } from "../api/videos";
 import { useApiClient } from "../api/useApiClient";
 import { DownloadButton } from "../downloads/DownloadButton";
+import { shareVideo } from "./shareVideo";
+import { useSavedState } from "./useSavedState";
+import { useVideoReaction } from "./useVideoReaction";
 import { formatCompactNumber } from "../ui/format";
 import { useTheme } from "../theme/ThemeProvider";
-
-type Reaction = 1 | -1 | 0;
-
-/** Signed change in a reaction's count bucket as `yourValue` moves from `from` to `to` — same arithmetic as the web's `action-pills.ts`. */
-function reactionDelta(from: Reaction, to: Reaction, bucket: 1 | -1): number {
-  const was = from === bucket ? 1 : 0;
-  const is = to === bucket ? 1 : 0;
-  return is - was;
-}
 
 export interface ActionPillsProps {
   video: Video;
@@ -42,74 +36,11 @@ export function ActionPills({ video, commentCount, isAuthenticated, onRequireAut
   const theme = useTheme();
   const client = useApiClient();
 
-  const [likeCount, setLikeCount] = useState(video.like_count ?? 0);
-  const [dislikeCount, setDislikeCount] = useState(video.dislike_count ?? 0);
-  const [yourReaction, setYourReaction] = useState<Reaction>((video.your_reaction ?? 0) as Reaction);
-  const [isSaved, setIsSaved] = useState(false);
-  const [savePending, setSavePending] = useState(false);
+  const { likeCount, dislikeCount, yourReaction, react } = useVideoReaction(video, isAuthenticated, onRequireAuth);
+  const { isSaved, toggleSave } = useSavedState(video.id, isAuthenticated, onRequireAuth);
 
-  async function react(value: Reaction): Promise<void> {
-    if (!isAuthenticated) {
-      onRequireAuth();
-      return;
-    }
-    const videoId = video.id;
-    if (!videoId) return;
-
-    const previousReaction = yourReaction;
-    const previousLikes = likeCount;
-    const previousDislikes = dislikeCount;
-    const nextReaction: Reaction = previousReaction === value ? 0 : value;
-
-    setYourReaction(nextReaction);
-    setLikeCount(previousLikes + reactionDelta(previousReaction, nextReaction, 1));
-    setDislikeCount(previousDislikes + reactionDelta(previousReaction, nextReaction, -1));
-
-    try {
-      const result = await postReaction(client, videoId, nextReaction);
-      setLikeCount(result.like_count ?? previousLikes);
-      setDislikeCount(result.dislike_count ?? previousDislikes);
-      setYourReaction((result.your_value ?? nextReaction) as Reaction);
-    } catch {
-      // Silent rollback — same idempotent-endpoint convention as the web.
-      setYourReaction(previousReaction);
-      setLikeCount(previousLikes);
-      setDislikeCount(previousDislikes);
-    }
-  }
-
-  async function toggleSave(): Promise<void> {
-    if (!isAuthenticated) {
-      onRequireAuth();
-      return;
-    }
-    const videoId = video.id;
-    if (!videoId || savePending) return;
-    const next = !isSaved;
-    setIsSaved(next);
-    setSavePending(true);
-    try {
-      if (next) {
-        await addToWatchLater(client, videoId);
-      } else {
-        await removeFromWatchLater(client, videoId);
-      }
-    } catch {
-      setIsSaved(!next);
-    } finally {
-      setSavePending(false);
-    }
-  }
-
-  async function share(): Promise<void> {
-    const videoId = video.id;
-    const url = client.baseUrl && videoId ? `${client.baseUrl.replace(/\/+$/, "")}/watch/${videoId}` : null;
-    if (!url) return;
-    try {
-      await Share.share({ message: url, url });
-    } catch {
-      // User-cancelled share sheets throw on some platforms — nothing to do.
-    }
+  function share(): Promise<void> {
+    return shareVideo(client, video.id);
   }
 
   return (

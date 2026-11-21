@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
 import { File } from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -51,7 +51,54 @@ import {
  * resume-after-app-relaunch, and no true backgrounded/killed-app transfer
  * (the progress notification keeps showing while this screen's JS is
  * still running, not longer than that).
+ *
+ * **M4 chunk 1 addition — Shorts creation** (PLAN.md §17.1 "record or pick
+ * from camera roll, trim, text overlay, upload as a Short"): rather than a
+ * second record/pick/upload screen, the Shorts tab's own "+ Short" button
+ * (`(tabs)/shorts.tsx`) deep-links here with `?isShort=1`, seeding
+ * `details.isShort` to `true` before "choose" ever renders — the `isShort`
+ * toggle and its wiring into `metadata.is_short` in `startUpload` already
+ * existed from M1 chunk 7 (this screen always supported uploading a Short,
+ * just via a chip the viewer had to notice and flip themselves). This
+ * chunk's real additions, both gated on `details.isShort`:
+ *  - **Trim, for real, on the record path**: `recordAsync({ maxDuration:
+ *    SHORT_MAX_DURATION_S })` hard-caps an in-app recording at 60s at the
+ *    source, so a recorded Short is never over length — no post-hoc cut
+ *    needed.
+ *  - **A pre-upload length guard, not a trim, on the library-pick path**:
+ *    `ImagePickerAsset.duration` (ms, supplied by the OS at pick time, no
+ *    extra probe needed) is checked against the same 60s cap right after
+ *    picking. A clip already ≤60s proceeds normally; a longer one is
+ *    rejected there with guidance instead of shipped through as a doomed
+ *    upload — **this app has no video-cutting capability** (no
+ *    `ffmpeg-kit`/`react-native-compressor`/similar is installed, and
+ *    adding an unverified native video-editing module, untested on a real
+ *    device, for one step of one chunk was judged a worse trade than an
+ *    honest length check with clear guidance). Anything that still slips
+ *    through (the OS doesn't guarantee `duration` is always populated)
+ *    still hits the server's own `encode_video` rejection for
+ *    `is_short=true` over 60s, which resolves to `WatchScreen`'s existing
+ *    generic "Processing failed" state once `resolveVideoId` below
+ *    navigates there — the "surface the server's rejection gracefully"
+ *    half of this chunk's brief, already satisfied by M1 chunk 4's code,
+ *    not something new built here. (That generic message — "Try again
+ *    from a desktop browser" — is honestly a slightly wrong suggestion for
+ *    a Short rejected for length specifically; not fixed here, since
+ *    `Video` carries no failure-reason field for the client to tell the
+ *    cases apart — a pre-existing contract gap flagged, not guessed
+ *    around.)
+ *  - **Text overlay = `title`.** `UploadDetailsForm`'s title field is
+ *    exactly what `ShortsFeedItem` already renders as the caption
+ *    overlaid on the Shorts feed — there is no separate "overlay text"
+ *    field in the contract, and no client-side video-composition pipeline
+ *    to burn text into pixels even if there were one. Reusing the one
+ *    real field that reaches the same on-screen place is a deliberate,
+ *    honest scope reading, not a silently dropped feature;
+ *    `UploadDetailsForm` relabels that field when `isShort` is set, to say
+ *    so.
  */
+
+const SHORT_MAX_DURATION_S = 60;
 
 type Stage =
   | { kind: "channel-error" }
@@ -80,9 +127,16 @@ export default function CreateScreen() {
   const client = useApiClient();
   const { user, accessToken } = useAuth();
   const upload = useTusUpload();
+  const { isShort: isShortParam } = useLocalSearchParams<{ isShort?: string }>();
 
   const [stage, setStage] = useState<Stage>(user?.channel_id ? { kind: "choose" } : { kind: "channel-error" });
-  const [details, setDetails] = useState<UploadDetailsValue>(INITIAL_DETAILS_VALUE);
+  // Seeded once from the Shorts tab's `?isShort=1` deep link (see this
+  // file's header doc comment) — read at mount only, same as `stage`
+  // above; the viewer can still flip the Type chip either way afterwards.
+  const [details, setDetails] = useState<UploadDetailsValue>(() => ({
+    ...INITIAL_DETAILS_VALUE,
+    isShort: isShortParam === "1",
+  }));
   const [categories, setCategories] = useState<Category[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -190,9 +244,18 @@ export default function CreateScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"] });
     if (result.canceled || !result.assets?.length) return;
 
-    const file = fileFromImagePickerAsset(result.assets[0]);
+    const asset = result.assets[0];
+    const file = fileFromImagePickerAsset(asset);
     if (file.size && file.size > MAX_UPLOAD_BYTES) {
       setFileError(`This file is larger than the ${MAX_UPLOAD_GB} GB upload limit.`);
+      return;
+    }
+    // Length guard for Shorts — see this file's header doc comment for why
+    // this is a reject-with-guidance check, not an in-app trim.
+    if (details.isShort && asset.duration != null && asset.duration > SHORT_MAX_DURATION_S * 1000) {
+      setFileError(
+        `This clip is longer than ${SHORT_MAX_DURATION_S} seconds — Shorts must be ${SHORT_MAX_DURATION_S}s or shorter. Trim it in your gallery app first, or record one directly here instead.`
+      );
       return;
     }
     setStage({ kind: "details", file });
@@ -221,7 +284,12 @@ export default function CreateScreen() {
       // OS reclaiming its cache would make disappear (PLAN.md §17.7's
       // "downloads go in documents, not cache" rule is about the offline
       // *library*, a different feature, not this transient recording).
-      const result = await cameraRef.current.recordAsync();
+      // Real trim-at-source for a Short: the camera itself refuses to
+      // record past 60s, so there is never a too-long recorded clip to
+      // reject or cut afterwards (see this file's header doc comment).
+      const result = await cameraRef.current.recordAsync(
+        details.isShort ? { maxDuration: SHORT_MAX_DURATION_S } : undefined
+      );
       setIsRecording(false);
       if (!result?.uri) {
         setStage({ kind: "choose" });
@@ -300,8 +368,13 @@ export default function CreateScreen() {
       <Screen centered>
         <View style={{ gap: theme.spacing[4], width: "100%" }}>
           <Text style={{ color: theme.colors.text, fontSize: theme.fontSize.lg, fontWeight: "700", textAlign: "center" }}>
-            Create
+            {details.isShort ? "Create a Short" : "Create"}
           </Text>
+          {details.isShort ? (
+            <Text style={{ color: theme.colors.textSecondary, fontSize: theme.fontSize.sm, textAlign: "center" }}>
+              {SHORT_MAX_DURATION_S}s or shorter · vertical video
+            </Text>
+          ) : null}
           <Button label="Choose from library" onPress={() => void pickFromLibrary()} testID="create-pick-library" />
           <Button label="Record video" onPress={() => void enterRecording()} variant="secondary" testID="create-record" />
           {fileError ? (

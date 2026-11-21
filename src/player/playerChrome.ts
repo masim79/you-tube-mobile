@@ -16,8 +16,11 @@
  * constant instead of bare hex scattered across call sites, and instead of
  * a token-name reuse that would be wrong in the light theme.
  *
- * Used only inside `src/player/` — anywhere else in the app, the no-hex
- * rule applies with no exception; use `useTheme()` there as normal.
+ * Used inside `src/player/` and, since M4 chunk 1, `src/shorts/` — the
+ * Shorts feed's full-bleed video surface and its overlay rail/caption are
+ * exactly the same "chrome sits directly on video, independent of app
+ * theme" case this constant exists for. Anywhere else in the app, the
+ * no-hex rule applies with no exception; use `useTheme()` there as normal.
  */
 export const PLAYER_CHROME = {
   /** Control icon/text color over the video surface. */

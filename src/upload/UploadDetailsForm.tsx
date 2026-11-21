@@ -57,8 +57,15 @@ export function UploadDetailsForm({
     <ScrollView showsVerticalScrollIndicator={false}>
       <View style={{ gap: theme.spacing[4] }}>
         <TextField
-          label="Title"
-          placeholder="Add a title that describes your video"
+          // M4 chunk 1: for a Short, this exact field is what
+          // `ShortsFeedItem` renders as the caption burned over the video
+          // in the feed — PLAN.md §17.1's "text overlay" creation step
+          // reuses `title` rather than a separate contract field (see
+          // `(tabs)/create.tsx`'s header doc comment for the full
+          // reasoning), so the label says so instead of calling it "Title"
+          // like the ordinary-video case.
+          label={value.isShort ? "Text overlay" : "Title"}
+          placeholder={value.isShort ? "Add text to show over your Short" : "Add a title that describes your video"}
           value={value.title}
           onChangeText={(text) => set("title", text)}
           maxLength={100}
