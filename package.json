@@ -39,6 +39,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
+    "setup:vendor": "node scripts/setup-vendor.mjs",
     "gen:api": "npx --yes openapi-typescript@7.13.0 vendor/you-tube/contracts/openapi.yaml -o src/api/schema.generated.ts",
     "gen:tokens": "node scripts/tokens-to-ts.mjs"
   },

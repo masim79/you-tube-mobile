@@ -1,3 +1,4 @@
 [submodule "vendor/you-tube"]
 	path = vendor/you-tube
 	url = https://github.com/masim79/you-tube.git
+	shallow = true
